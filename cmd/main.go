@@ -6,37 +6,45 @@ import (
 )
 
 func main() {
-
-	metadata := db.TableMetadata{
-		Name:        "users",
-		ColumnCount: 3,
-		Columns: []db.Column{
-			{Name: "Id", DataType: db.TypeInteger, Length: 0, IsNullable: false},
-			{Name: "email", DataType: db.TypeString, Length: 100, IsNullable: false},
-			{Name: "password", DataType: db.TypeString, Length: 100, IsNullable: false},
-		},
-		RowCount:   0,
-		DataOffset: 0,
-	}
-
-	testFileHeader := db.FileHeader{
-		Magic:          db.MagicNumber,
-		Version:        db.CurrentVersion,
-		MetadataLength: 0,
-	}
-
 	serializer := db.BinarySerializer{}
 
-	bytes, err := serializer.SerializeHeader(testFileHeader)
+	table := db.Table{
+		Header: db.FileHeader{
+			Magic:          0x42424242,
+			Version:        1,
+			MetadataLength: 0,
+		},
+		Metadata: db.TableMetadata{
+			Name:        "test",
+			ColumnCount: 2,
+			Columns: []db.Column{
+				{Name: "name", DataType: db.TypeString, Length: 300, IsNullable: false},
+				{Name: "number", DataType: db.TypeInteger, Length: 0, IsNullable: false},
+			},
+			RowCount:   2,
+			DataOffset: 0,
+		},
+		Data: [][]interface{}{
+			{"test", int64(123)},
+			{"test2", int64(456)},
+		},
+	}
 
+	tableBytes, err := serializer.SerializeTable(table)
 	if err != nil {
 		panic(err)
 	}
 
-	deserializedHeader, err := serializer.DeserializeHeader(bytes)
+	fmt.Println(tableBytes)
 
-	fmt.Println(testFileHeader)
-	fmt.Println(bytes)
-	fmt.Println(deserializedHeader)
+	deserialisedTable, err := serializer.DeserializeTable(tableBytes)
+	if err != nil {
+		panic(err)
+	}
 
+	fmt.Println(deserialisedTable)
+
+	fmt.Println(deserialisedTable.Header)
+	fmt.Println(deserialisedTable.Metadata)
+	fmt.Println(deserialisedTable.Data)
 }
