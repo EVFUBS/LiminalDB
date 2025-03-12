@@ -31,7 +31,7 @@ type TableMetadata struct {
 	ColumnCount int64
 	Columns     []Column
 	RowCount    int64
-	DataOffset  int64 // Where actual data begins in the file
+	DataOffset  uint32 // Where actual data begins in the file
 }
 
 func (m *TableMetadata) ValidateMetadata() error {
@@ -78,8 +78,8 @@ type Column struct {
 type ColumnType int8
 
 const (
-	TypeInteger ColumnType = iota
-	TypeFloat
+	TypeInteger64 ColumnType = iota
+	TypeFloat64
 	TypeString
 	TypeBoolean
 	TypeTimestamp

@@ -1,7 +1,7 @@
 package tests
 
 import (
-	"LiminalDb/db"
+	"LiminalDb/internal/db"
 	"bytes"
 	"encoding/binary"
 	"testing"

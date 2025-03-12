@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"io"
+	"os"
 	"time"
 )
 
@@ -72,25 +74,25 @@ func (b BinarySerializer) DeserializeHeader(buf *bytes.Reader) (FileHeader, erro
 // 5. row count
 // 6. data offset (where the actual data starts)
 
-func (b BinarySerializer) SerializeMetadata(metadata TableMetadata) ([]byte, error) {
+func (b BinarySerializer) SerializeMetadata(metadata TableMetadata) ([]byte, uint32, error) {
 	buf := new(bytes.Buffer)
 
 	// Write table name length and table name
 	nameBytes := []byte(metadata.Name)
 	if err := binary.Write(buf, binary.LittleEndian, uint16(len(nameBytes))); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	//if _, err := buf.Write(nameBytes); err != nil {
 	//	return nil, err
 	//}
 
 	if err := binary.Write(buf, binary.LittleEndian, nameBytes); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	// Write column count
 	if err := binary.Write(buf, binary.LittleEndian, metadata.ColumnCount); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	// Write columns
@@ -98,41 +100,41 @@ func (b BinarySerializer) SerializeMetadata(metadata TableMetadata) ([]byte, err
 		// Write column name length and name
 		colNameBytes := []byte(col.Name)
 		if err := binary.Write(buf, binary.LittleEndian, uint16(len(colNameBytes))); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		//if _, err := buf.Write(colNameBytes); err != nil {
 		//	return nil, err
 		//}
 
 		if err := binary.Write(buf, binary.LittleEndian, colNameBytes); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 
 		// Write column type
 		if err := binary.Write(buf, binary.LittleEndian, col.DataType); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 
 		// Write length for variable-length types
 		if err := binary.Write(buf, binary.LittleEndian, col.Length); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 
 		// Write nullable flag
 		if err := binary.Write(buf, binary.LittleEndian, col.IsNullable); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 	}
 
 	// Write row count and data offset
 	if err := binary.Write(buf, binary.LittleEndian, metadata.RowCount); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if err := binary.Write(buf, binary.LittleEndian, metadata.DataOffset); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	return buf.Bytes(), nil
+	return buf.Bytes(), uint32(buf.Len()), nil
 }
 
 func (b BinarySerializer) DeserializeMetadata(buf *bytes.Reader) (TableMetadata, error) {
@@ -207,14 +209,14 @@ func (b BinarySerializer) SerializeRow(data []interface{}, columns []Column) ([]
 
 		switch v := val.(type) {
 		case int64:
-			if col.DataType != TypeInteger {
+			if col.DataType != TypeInteger64 {
 				return nil, errors.New("data type mismatch for column " + col.Name)
 			}
 			if err := binary.Write(buf, binary.LittleEndian, v); err != nil {
 				return nil, err
 			}
 		case float64:
-			if col.DataType != TypeFloat {
+			if col.DataType != TypeFloat64 {
 				return nil, errors.New("data type mismatch for column " + col.Name)
 			}
 			if err := binary.Write(buf, binary.LittleEndian, v); err != nil {
@@ -238,7 +240,13 @@ func (b BinarySerializer) SerializeRow(data []interface{}, columns []Column) ([]
 			if col.DataType != TypeBoolean {
 				return nil, errors.New("data type mismatch for column " + col.Name)
 			}
-			if err := binary.Write(buf, binary.LittleEndian, v); err != nil {
+			var boolByte byte
+			if v {
+				boolByte = 1
+			} else {
+				boolByte = 0
+			}
+			if err := binary.Write(buf, binary.LittleEndian, boolByte); err != nil {
 				return nil, err
 			}
 		case time.Time:
@@ -260,13 +268,13 @@ func (b BinarySerializer) DeserializeRow(buf *bytes.Reader, columns []Column) ([
 
 	for _, col := range columns {
 		switch col.DataType {
-		case TypeInteger:
-			var val int32
+		case TypeInteger64:
+			var val int64
 			if err := binary.Read(buf, binary.LittleEndian, &val); err != nil {
 				return nil, err
 			}
 			row = append(row, val)
-		case TypeFloat:
+		case TypeFloat64:
 			var val float64
 			if err := binary.Read(buf, binary.LittleEndian, &val); err != nil {
 				return nil, err
@@ -288,11 +296,11 @@ func (b BinarySerializer) DeserializeRow(buf *bytes.Reader, columns []Column) ([
 			}
 			row = append(row, string(strBytes))
 		case TypeBoolean:
-			var val bool
-			if err := binary.Read(buf, binary.LittleEndian, &val); err != nil {
+			var boolByte byte
+			if err := binary.Read(buf, binary.LittleEndian, &boolByte); err != nil {
 				return nil, err
 			}
-			row = append(row, val)
+			row = append(row, boolByte == 1)
 		case TypeTimestamp:
 			var unixTime int64
 			if err := binary.Read(buf, binary.LittleEndian, &unixTime); err != nil {
@@ -310,12 +318,22 @@ func (b BinarySerializer) DeserializeRow(buf *bytes.Reader, columns []Column) ([
 func (b BinarySerializer) SerializeTable(table Table) ([]byte, error) {
 	buf := new(bytes.Buffer)
 
+	_, metadataLength, err := b.SerializeMetadata(table.Metadata)
+	if err != nil {
+		return nil, err
+	}
+
+	table.Header.MetadataLength = metadataLength
+
 	headerBytes, err := b.SerializeHeader(table.Header)
 	if err != nil {
 		return nil, err
 	}
 
-	metadataBytes, err := b.SerializeMetadata(table.Metadata)
+	dataOffset := uint32(len(headerBytes)) + metadataLength
+	table.Metadata.DataOffset = dataOffset
+
+	metadataBytes, _, err := b.SerializeMetadata(table.Metadata)
 	if err != nil {
 		return nil, err
 	}
@@ -361,6 +379,48 @@ func (b BinarySerializer) DeserializeTable(data []byte) (Table, error) {
 	return Table{Header: header, Metadata: metadata, Data: rows}, nil
 }
 
-func (b BinarySerializer) CalculateMetadataLength(metadata TableMetadata) int64 {
-	return int64(len(metadata.Name)) + int64(metadata.ColumnCount) + int64(len(metadata.Columns)) + int64(metadata.RowCount) + int64(metadata.DataOffset)
+func (b BinarySerializer) WriteTableToFile(table Table, filename string) error {
+	serialisedTable, err := b.SerializeTable(table)
+	if err != nil {
+		return err
+	}
+
+	if _, err := os.Stat("db"); os.IsNotExist(err) {
+		err = os.Mkdir("db", os.ModePerm)
+		if err != nil {
+			return err
+		}
+	}
+
+	filename = "db/" + filename
+
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	_, err = file.Write(serialisedTable)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (b BinarySerializer) ReadTableFromFile(filename string) (Table, error) {
+	filename = "db/" + filename + ".bin"
+
+	file, err := os.Open(filename)
+	if err != nil {
+		return Table{}, err
+	}
+	defer file.Close()
+
+	serialisedTable, err := io.ReadAll(file)
+	if err != nil {
+		return Table{}, err
+	}
+
+	return b.DeserializeTable(serialisedTable)
 }
