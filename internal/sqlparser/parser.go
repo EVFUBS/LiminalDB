@@ -25,11 +25,6 @@ func NewParser(l *Lexer) *Parser {
 // Statements
 type Statement interface{}
 
-type CreateTableStatement struct {
-	TableName string
-	Columns   []ColumnDefinition
-}
-
 type SelectStatement struct {
 	Fields    []string
 	TableName string
@@ -40,6 +35,24 @@ type InsertStatement struct {
 	TableName  string
 	Columns    []string
 	ValueLists [][]Expression
+}
+
+type CreateTableStatement struct {
+	TableName string
+	Columns   []ColumnDefinition
+}
+
+type DeleteStatement struct {
+	TableName string
+	Where     Expression
+}
+
+type DropTableStatement struct {
+	TableName string
+}
+
+type DescribeTableStatement struct {
+	TableName string
 }
 
 // Expressions
@@ -133,6 +146,12 @@ func (p *Parser) ParseStatement() Statement {
 		return p.parseInsertStatement()
 	case CREATE:
 		return p.parseCreateTableStatement()
+	case DELETE:
+		return p.parseDeleteStatement()
+	case DROP:
+		return p.parseDropTableStatement()
+	case DESC:
+		return p.parseDescribeTableStatement()
 	default:
 		return nil
 	}
@@ -221,6 +240,60 @@ func (p *Parser) parseCreateTableStatement() *CreateTableStatement {
 	if !p.expectPeek(RPAREN) {
 		return nil
 	}
+
+	return stmt
+}
+
+func (p *Parser) parseDeleteStatement() *DeleteStatement {
+	stmt := &DeleteStatement{}
+
+	if !p.expectPeek(FROM) {
+		return nil
+	}
+
+	if !p.expectPeek(IDENT) {
+		return nil
+	}
+
+	stmt.TableName = p.curToken.Literal
+
+	if p.peekTokenIs(WHERE) {
+		p.nextToken()
+		p.nextToken()
+		stmt.Where = p.parseExpression()
+	}
+
+	return stmt
+}
+
+func (p *Parser) parseDropTableStatement() *DropTableStatement {
+	stmt := &DropTableStatement{}
+
+	if !p.expectPeek(TABLE) {
+		return nil
+	}
+
+	if !p.expectPeek(IDENT) {
+		return nil
+	}
+
+	stmt.TableName = p.curToken.Literal
+
+	return stmt
+}
+
+func (p *Parser) parseDescribeTableStatement() *DescribeTableStatement {
+	stmt := &DescribeTableStatement{}
+
+	if !p.expectPeek(TABLE) {
+		return nil
+	}
+
+	if !p.expectPeek(IDENT) {
+		return nil
+	}
+
+	stmt.TableName = p.curToken.Literal
 
 	return stmt
 }

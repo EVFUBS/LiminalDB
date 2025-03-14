@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+func getTableFilePath(filename string) string {
+	return DatabaseDir + "/" + filename + FileExtension
+}
+
 type Serializer interface {
 	SerializeHeader(header FileHeader) ([]byte, error)
 	DeserializeHeader(data []byte) (FileHeader, error)
@@ -333,6 +337,7 @@ func (b BinarySerializer) SerializeTable(table Table) ([]byte, error) {
 	dataOffset := uint32(len(headerBytes)) + metadataLength
 	table.Metadata.DataOffset = dataOffset
 	table.Metadata.RowCount = int64(len(table.Data))
+	table.Metadata.ColumnCount = int64(len(table.Metadata.Columns))
 
 	metadataBytes, _, err := b.SerializeMetadata(table.Metadata)
 	if err != nil {
@@ -386,14 +391,14 @@ func (b BinarySerializer) WriteTableToFile(table Table, filename string) error {
 		return err
 	}
 
-	if _, err := os.Stat("db"); os.IsNotExist(err) {
-		err = os.Mkdir("db", os.ModePerm)
+	if _, err := os.Stat(DatabaseDir); os.IsNotExist(err) {
+		err = os.Mkdir(DatabaseDir, os.ModePerm)
 		if err != nil {
 			return err
 		}
 	}
 
-	filename = "db/" + filename + ".bin"
+	filename = getTableFilePath(filename)
 
 	file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
 	if err != nil {
@@ -410,7 +415,7 @@ func (b BinarySerializer) WriteTableToFile(table Table, filename string) error {
 }
 
 func (b BinarySerializer) ReadTableFromFile(filename string) (Table, error) {
-	filename = "db/" + filename + ".bin"
+	filename = getTableFilePath(filename)
 
 	file, err := os.Open(filename)
 	if err != nil {

@@ -6,6 +6,19 @@ import (
 	"sync"
 )
 
+const (
+	TypeInteger64 ColumnType = iota
+	TypeFloat64
+	TypeString
+	TypeBoolean
+	TypeTimestamp
+)
+
+const (
+	DatabaseDir   = "db"
+	FileExtension = ".bin"
+)
+
 // Table metadata structure
 
 type DatabaseFile struct {
@@ -33,6 +46,17 @@ type TableMetadata struct {
 	RowCount    int64
 	DataOffset  uint32 // Where actual data begins in the file
 }
+
+// Column definition
+type Column struct {
+	Name       string
+	DataType   ColumnType
+	Length     uint16 // For variable-length types like strings
+	IsNullable bool
+}
+
+// Custom data types enum
+type ColumnType int8
 
 func (m *TableMetadata) ValidateMetadata() error {
 	if m.Name == "" {
@@ -66,21 +90,19 @@ func (m *TableMetadata) ValidateMetadata() error {
 	return nil
 }
 
-// Column definition
-type Column struct {
-	Name       string
-	DataType   ColumnType
-	Length     uint16 // For variable-length types like strings
-	IsNullable bool
+func (c ColumnType) String() string {
+	switch c {
+	case TypeInteger64:
+		return "INT"
+	case TypeFloat64:
+		return "FLOAT"
+	case TypeString:
+		return "STRING"
+	case TypeBoolean:
+		return "BOOL"
+	case TypeTimestamp:
+		return "TIMESTAMP"
+	default:
+		return "UNKNOWN"
+	}
 }
-
-// Custom data types enum
-type ColumnType int8
-
-const (
-	TypeInteger64 ColumnType = iota
-	TypeFloat64
-	TypeString
-	TypeBoolean
-	TypeTimestamp
-)

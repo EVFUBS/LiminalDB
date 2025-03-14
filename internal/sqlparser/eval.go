@@ -3,15 +3,18 @@ package sqlparser
 import (
 	"LiminalDb/internal/db"
 	"fmt"
-	"strings"
 )
 
 type Evaluator struct {
-	parser *Parser
+	parser     *Parser
+	operations db.Operations
 }
 
 func NewEvaluator(parser *Parser) *Evaluator {
-	return &Evaluator{parser: parser}
+	return &Evaluator{
+		parser:     parser,
+		operations: &db.OperationsImpl{},
+	}
 }
 
 func (e *Evaluator) Execute(query string) (interface{}, error) {
@@ -31,13 +34,18 @@ func (e *Evaluator) Execute(query string) (interface{}, error) {
 		return e.executeInsert(stmt)
 	case *CreateTableStatement:
 		return e.executeCreateTable(stmt)
+	case *DeleteStatement:
+		return e.executeDelete(stmt)
+	case *DropTableStatement:
+		return e.executeDropTable(stmt)
+	case *DescribeTableStatement:
+		return e.executeDescribeTable(stmt)
 	default:
 		return nil, fmt.Errorf("unsupported statement type")
 	}
 }
 
 func (e *Evaluator) executeSelect(stmt *SelectStatement) (interface{}, error) {
-	// For simplicity, let's assume we have a function fetchData that takes a table name and fields and returns the data
 	data, err := e.selectData(stmt.TableName, stmt.Fields, stmt.Where)
 	if err != nil {
 		return nil, err
@@ -61,10 +69,33 @@ func (e *Evaluator) executeCreateTable(stmt *CreateTableStatement) (interface{},
 	return data, nil
 }
 
+func (e *Evaluator) executeDelete(stmt *DeleteStatement) (interface{}, error) {
+	data, err := e.deleteData(stmt.TableName, stmt.Where)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func (e *Evaluator) executeDropTable(stmt *DropTableStatement) (interface{}, error) {
+	data, err := e.dropTable(stmt.TableName)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func (e *Evaluator) executeDescribeTable(stmt *DescribeTableStatement) (interface{}, error) {
+	data, err := e.describeTable(stmt.TableName)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
 func (e *Evaluator) Evaluate(expr Expression, row []interface{}, columns []db.Column) (interface{}, error) {
 	switch expr := expr.(type) {
 	case *Identifier:
-		// Find the index of the column with the given name
 		for i, col := range columns {
 			if col.Name == expr.Value {
 				return row[i], nil
@@ -93,6 +124,7 @@ func (e *Evaluator) Evaluate(expr Expression, row []interface{}, columns []db.Co
 			return left == right, nil
 		case "!=":
 			return left != right, nil
+		// TODO: THIS IS A HUGE PROBLEM FIX AS IT COULD BE FLOATS AS WELL FOR EXAMPLE
 		case ">":
 			return left.(int) > right.(int), nil
 		case ">=":
@@ -109,51 +141,23 @@ func (e *Evaluator) Evaluate(expr Expression, row []interface{}, columns []db.Co
 	}
 }
 
-// Dummy selectData function for demonstration purposes
 func (e *Evaluator) selectData(tableName string, fields []string, where Expression) (interface{}, error) {
-	serializer := db.BinarySerializer{}
-
-	table, err := serializer.ReadTableFromFile(tableName)
-	if err != nil {
-		return nil, err
-	}
-
-	filteredData := [][]interface{}{}
-
-	for _, row := range table.Data {
-		if where != nil {
-			matches, err := e.Evaluate(where, row, table.Metadata.Columns)
-			if err != nil {
-				return nil, err
-			}
-			if !matches.(bool) {
-				continue
-			}
-
-			filteredRow := []interface{}{}
-			for _, field := range fields {
-				for index, col := range table.Metadata.Columns {
-					if strings.EqualFold(col.Name, field) {
-						filteredRow = append(filteredRow, row[index])
-					}
-				}
-			}
-			filteredData = append(filteredData, filteredRow)
+	filter := func(row []interface{}, columns []db.Column) (bool, error) {
+		if where == nil {
+			return true, nil
 		}
+		matches, err := e.Evaluate(where, row, columns)
+		if err != nil {
+			return false, err
+		}
+		return matches.(bool), nil
 	}
-	return filteredData, nil
+
+	return e.operations.ReadRows(tableName, fields, filter)
 }
 
 func (e *Evaluator) insertData(tableName string, fields []string, values [][]Expression) (interface{}, error) {
-	serializer := db.BinarySerializer{}
-
-	fmt.Printf("Reading table: %s\n", tableName)
-	table, err := serializer.ReadTableFromFile(tableName)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Printf("Current table data: %v\n", table.Data)
-
+	data := [][]interface{}{}
 	for _, value := range values {
 		row := make([]interface{}, len(fields))
 		for i, _ := range fields {
@@ -163,32 +167,18 @@ func (e *Evaluator) insertData(tableName string, fields []string, values [][]Exp
 				row[i] = nil
 			}
 		}
-		fmt.Printf("Adding new row: %v\n", row)
-		table.Data = append(table.Data, row)
+		data = append(data, row)
 	}
-	fmt.Printf("Table data after insert: %v\n", table.Data)
 
-	fmt.Printf("Writing table back to file: %s\n", tableName)
-	err = serializer.WriteTableToFile(table, tableName)
+	err := e.operations.WriteRows(tableName, data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to write table: %w", err)
 	}
 
-	// Verify the write by reading it back
-	fmt.Printf("Verifying write by reading table again\n")
-	verifyTable, err := serializer.ReadTableFromFile(tableName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to verify write: %w", err)
-	}
-	fmt.Printf("Table data after re-reading: %v\n", verifyTable.Data)
-
-	return table, nil
+	return "Insert successful", nil
 }
 
 func (e *Evaluator) createTable(tableName string, columns []ColumnDefinition) (interface{}, error) {
-	serializer := db.BinarySerializer{}
-
-	// Convert column definitions to db.Column format
 	dbColumns := make([]db.Column, len(columns))
 	for i, col := range columns {
 
@@ -205,26 +195,53 @@ func (e *Evaluator) createTable(tableName string, columns []ColumnDefinition) (i
 		}
 	}
 
-	// Create new table structure
-	table := db.Table{
-		Header: db.FileHeader{
-			Magic:   db.MagicNumber,
-			Version: db.CurrentVersion,
-		},
-		Metadata: db.TableMetadata{
-			Name:    tableName,
-			Columns: dbColumns,
-		},
-		Data: [][]interface{}{},
+	metadata := db.TableMetadata{
+		Name:    tableName,
+		Columns: dbColumns,
 	}
 
-	// Write the new table to file
-	err := serializer.WriteTableToFile(table, tableName)
+	err := e.operations.CreateTable(metadata)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create table: %w", err)
 	}
 
-	return table, nil
+	return "Create table successful", nil
+}
+
+func (e *Evaluator) deleteData(tableName string, where Expression) (interface{}, error) {
+	filter := func(row []interface{}, columns []db.Column) (bool, error) {
+		if where == nil {
+			return true, nil
+		}
+		matches, err := e.Evaluate(where, row, columns)
+		if err != nil {
+			return false, err
+		}
+		return matches.(bool), nil
+	}
+
+	deletedCount, err := e.operations.DeleteRows(tableName, filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete rows: %w", err)
+	}
+
+	if deletedCount == 0 {
+		return "No rows deleted", nil
+	}
+	return fmt.Sprintf("%d row(s) deleted", deletedCount), nil
+}
+
+func (e *Evaluator) dropTable(tableName string) (interface{}, error) {
+	// TODO: Implement drop table
+	return nil, nil
+}
+
+func (e *Evaluator) describeTable(tableName string) (interface{}, error) {
+	metadata, err := e.operations.ReadMetadata(tableName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read metadata: %w", err)
+	}
+	return metadata, nil
 }
 
 func convertTokenTypeToColumnType(tokenType TokenType) (db.ColumnType, error) {

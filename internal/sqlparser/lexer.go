@@ -69,7 +69,7 @@ func (l *Lexer) NextToken() Token {
 
 func (l *Lexer) readIdentifier() string {
 	position := l.position
-	for isLetter(l.ch) {
+	for isAlphanumeric(l.ch) {
 		l.readChar()
 	}
 	return l.input[position:l.position]
@@ -94,7 +94,11 @@ func newToken(tokenType TokenType, ch byte) Token {
 }
 
 func isLetter(ch byte) bool {
-	return 'a' <= ch && ch <= 'z' || 'A' <= ch && ch <= 'Z' || ch == '_'
+	return ('a' <= ch && ch <= 'z') || ('A' <= ch && ch <= 'Z') || ch == '_'
+}
+
+func isAlphanumeric(ch byte) bool {
+	return isLetter(ch) || isDigit(ch)
 }
 
 func isDigit(ch byte) bool {
@@ -147,6 +151,8 @@ const (
 	DROP   = "DROP"
 	NULL   = "NULL"
 	NOT    = "NOT"
+	DELETE = "DELETE"
+	DESC   = "DESC"
 )
 
 var keywords = map[string]TokenType{
@@ -167,6 +173,8 @@ var keywords = map[string]TokenType{
 	"string": STRINGTYPE,
 	"null":   NULL,
 	"not":    NOT,
+	"delete": DELETE,
+	"desc":   DESC,
 }
 
 func LookupIdent(ident string) TokenType {
