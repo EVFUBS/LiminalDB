@@ -44,18 +44,19 @@ func (l *Lexer) NextToken() Token {
 	case '+':
 		tok = newToken(PLUS, l.ch)
 	case '\'':
-		tok = newToken(QUOTE, l.ch)
-	case 0:
-		tok.Literal = ""
-		tok.Type = EOF
+		tok.Type = STRING
+		tok.Literal = l.readString()
+		return tok
+	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		return l.readNumberToken()
 	default:
 		if isLetter(l.ch) {
 			tok.Literal = l.readIdentifier()
+			if tok.Literal == "true" || tok.Literal == "false" {
+				tok.Type = BOOL
+				return tok
+			}
 			tok.Type = LookupIdent(tok.Literal)
-			return tok
-		} else if isDigit(l.ch) {
-			tok.Type = INT
-			tok.Literal = l.readNumber()
 			return tok
 		} else {
 			tok = newToken(ILLEGAL, l.ch)
@@ -112,8 +113,17 @@ const (
 	EOF     = "EOF"
 
 	// Identifiers + literals
-	IDENT = "IDENT" // add, foobar, x, y, ...
-	INT   = "INT"   // 1343456
+	IDENT  = "IDENT"  // add, foobar, x, y, ...
+	INT    = "INT"    // 1343456
+	STRING = "STRING" // "foo bar"
+	FLOAT  = "FLOAT"  // 123.456
+	BOOL   = "BOOL"   // true, false
+
+	// Types
+	INTTYPE    = "INT"
+	FLOATTYPE  = "FLOAT"
+	BOOLTYPE   = "BOOL"
+	STRINGTYPE = "STRING"
 
 	// Operators
 	ASSIGN = "="
@@ -129,16 +139,34 @@ const (
 	SELECT = "SELECT"
 	FROM   = "FROM"
 	WHERE  = "WHERE"
-
-	STRING = "STRING"
-
-	QUOTE = "'"
+	INSERT = "INSERT"
+	INTO   = "INTO"
+	VALUES = "VALUES"
+	CREATE = "CREATE"
+	TABLE  = "TABLE"
+	DROP   = "DROP"
+	NULL   = "NULL"
+	NOT    = "NOT"
 )
 
 var keywords = map[string]TokenType{
 	"select": SELECT,
 	"from":   FROM,
 	"where":  WHERE,
+	"insert": INSERT,
+	"into":   INTO,
+	"values": VALUES,
+	"true":   BOOL,
+	"false":  BOOL,
+	"create": CREATE,
+	"table":  TABLE,
+	"drop":   DROP,
+	"int":    INTTYPE,
+	"float":  FLOATTYPE,
+	"bool":   BOOLTYPE,
+	"string": STRINGTYPE,
+	"null":   NULL,
+	"not":    NOT,
 }
 
 func LookupIdent(ident string) TokenType {
@@ -147,4 +175,48 @@ func LookupIdent(ident string) TokenType {
 		return tok
 	}
 	return IDENT
+}
+
+func (l *Lexer) readString() string {
+	position := l.position + 1 // Skip the opening quote
+	for {
+		l.readChar()
+		if l.ch == '\'' || l.ch == 0 {
+			break
+		}
+	}
+
+	value := l.input[position:l.position]
+	l.readChar()
+
+	return value
+}
+
+func (l *Lexer) readNumberToken() Token {
+	var tok Token
+	startPos := l.position
+	isFloat := false
+
+	// Read the integer part
+	for isDigit(l.ch) {
+		l.readChar()
+	}
+
+	// Check for decimal point
+	if l.ch == '.' {
+		isFloat = true
+		l.readChar()
+		// Read decimal places
+		for isDigit(l.ch) {
+			l.readChar()
+		}
+	}
+
+	if isFloat {
+		tok.Type = FLOAT
+	} else {
+		tok.Type = INT
+	}
+	tok.Literal = l.input[startPos:l.position]
+	return tok
 }

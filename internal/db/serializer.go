@@ -332,6 +332,7 @@ func (b BinarySerializer) SerializeTable(table Table) ([]byte, error) {
 
 	dataOffset := uint32(len(headerBytes)) + metadataLength
 	table.Metadata.DataOffset = dataOffset
+	table.Metadata.RowCount = int64(len(table.Data))
 
 	metadataBytes, _, err := b.SerializeMetadata(table.Metadata)
 	if err != nil {
@@ -392,9 +393,9 @@ func (b BinarySerializer) WriteTableToFile(table Table, filename string) error {
 		}
 	}
 
-	filename = "db/" + filename
+	filename = "db/" + filename + ".bin"
 
-	file, err := os.Create(filename)
+	file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
 	if err != nil {
 		return err
 	}
