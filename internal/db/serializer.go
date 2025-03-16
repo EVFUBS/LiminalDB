@@ -9,6 +9,21 @@ import (
 	"time"
 )
 
+// table file structure:
+// Header:
+// 1. Magic Version
+// 2. Version
+// 3. MetadataLength
+// Metadata:
+// 1. table name length
+// 2. table name
+// 3. column count
+// 4. columns
+// 5. row count
+// 6. data offset (where the actual data starts)
+// Data:
+// Serialized rows
+
 func getTableFilePath(filename string) string {
 	return DatabaseDir + "/" + filename + FileExtension
 }
@@ -24,11 +39,6 @@ type Serializer interface {
 
 type BinarySerializer struct {
 }
-
-// Header Structure
-// 1. Magic Version
-// 2. Version
-// 3. MetadataLength
 
 func (b BinarySerializer) SerializeHeader(header FileHeader) ([]byte, error) {
 	buf := new(bytes.Buffer)
@@ -69,14 +79,6 @@ func (b BinarySerializer) DeserializeHeader(buf *bytes.Reader) (FileHeader, erro
 
 	return header, nil
 }
-
-// Metadata Structure
-// 1. table name length
-// 2. table name
-// 3. column count
-// 4. columns
-// 5. row count
-// 6. data offset (where the actual data starts)
 
 func (b BinarySerializer) SerializeMetadata(metadata TableMetadata) ([]byte, uint32, error) {
 	buf := new(bytes.Buffer)

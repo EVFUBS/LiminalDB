@@ -197,12 +197,14 @@ func formatQueryResult(result *db.QueryResult) string {
 
 	var sb strings.Builder
 
-	sb.WriteString("+-----------------+\n")
+	sb.WriteString(formatSeparator(result.Columns))
+
 	for i := range result.Columns {
 		sb.WriteString(fmt.Sprintf("| %-15s ", result.Columns[i].Name))
 	}
 	sb.WriteString("|\n")
-	sb.WriteString("+-----------------+\n")
+
+	sb.WriteString(formatSeparator(result.Columns))
 
 	for _, row := range result.Rows {
 		for _, value := range row {
@@ -210,7 +212,8 @@ func formatQueryResult(result *db.QueryResult) string {
 		}
 		sb.WriteString("|\n")
 	}
-	sb.WriteString("+-----------------+\n")
+
+	sb.WriteString(formatSeparator(result.Columns))
 
 	return sb.String()
 }
@@ -238,4 +241,14 @@ func formatValue(v interface{}) string {
 		return "NULL"
 	}
 	return fmt.Sprintf("%v", v)
+}
+
+func formatSeparator(columns []db.Column) string {
+	sb := strings.Builder{}
+	sb.WriteString("+")
+	for range columns {
+		sb.WriteString("-----------------+")
+	}
+	sb.WriteString("\n")
+	return sb.String()
 }
