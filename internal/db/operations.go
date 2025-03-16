@@ -14,7 +14,7 @@ type Operations interface {
 	DropTable(tableName string) error
 	ReadMetadata(filename string) (TableMetadata, error)
 	WriteRows(tableName string, data [][]interface{}) error
-	ReadRows(tableName string, fields []string, filter func([]interface{}, []Column) (bool, error)) ([][]interface{}, error)
+	ReadRows(tableName string, fields []string, filter func([]interface{}, []Column) (bool, error)) (*QueryResult, error)
 	DeleteRows(tableName string, filter func([]interface{}, []Column) (bool, error)) (int64, error)
 }
 
@@ -67,13 +67,15 @@ func (o *OperationsImpl) WriteRows(tableName string, data [][]interface{}) error
 	return o.serializer.WriteTableToFile(table, tableName)
 }
 
-func (o *OperationsImpl) ReadRows(tableName string, fields []string, filter func([]interface{}, []Column) (bool, error)) ([][]interface{}, error) {
+func (o *OperationsImpl) ReadRows(tableName string, fields []string, filter func([]interface{}, []Column) (bool, error)) (*QueryResult, error) {
 	table, err := o.serializer.ReadTableFromFile(tableName)
 	if err != nil {
-		return nil, err
+		return &QueryResult{}, err
 	}
 
-	filteredData := [][]interface{}{}
+	result := &QueryResult{
+		Columns: table.Metadata.Columns,
+	}
 
 	for _, row := range table.Data {
 		if filter != nil {
@@ -107,10 +109,10 @@ func (o *OperationsImpl) ReadRows(tableName string, fields []string, filter func
 			}
 		}
 
-		filteredData = append(filteredData, selectedRow)
+		result.Rows = append(result.Rows, selectedRow)
 	}
 
-	return filteredData, nil
+	return result, nil
 }
 
 func (o *OperationsImpl) DeleteRows(tableName string, filter func([]interface{}, []Column) (bool, error)) (int64, error) {

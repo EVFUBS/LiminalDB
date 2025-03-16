@@ -161,7 +161,9 @@ func (p *Parser) parseSelectStatement() *SelectStatement {
 	stmt := &SelectStatement{}
 
 	if !p.expectPeek(IDENT) {
-		return nil
+		if !p.expectPeek(ALL) {
+			return nil
+		}
 	}
 
 	stmt.Fields = p.parseIdentifierList()

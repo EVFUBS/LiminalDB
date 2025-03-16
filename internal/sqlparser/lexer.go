@@ -43,6 +43,8 @@ func (l *Lexer) NextToken() Token {
 		tok = newToken(COMMA, l.ch)
 	case '+':
 		tok = newToken(PLUS, l.ch)
+	case '*':
+		tok = newToken(ALL, l.ch)
 	case '\'':
 		tok.Type = STRING
 		tok.Literal = l.readString()
@@ -122,6 +124,7 @@ const (
 	STRING = "STRING" // "foo bar"
 	FLOAT  = "FLOAT"  // 123.456
 	BOOL   = "BOOL"   // true, false
+	ALL    = "*"
 
 	// Types
 	INTTYPE    = "INT"
@@ -175,6 +178,7 @@ var keywords = map[string]TokenType{
 	"not":    NOT,
 	"delete": DELETE,
 	"desc":   DESC,
+	"*":      ALL,
 }
 
 func LookupIdent(ident string) TokenType {

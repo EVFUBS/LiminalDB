@@ -58,6 +58,11 @@ type Column struct {
 // Custom data types enum
 type ColumnType int8
 
+type QueryResult struct {
+	Columns []Column
+	Rows    [][]interface{}
+}
+
 func (m *TableMetadata) ValidateMetadata() error {
 	if m.Name == "" {
 		return errors.New("table name cannot be empty")

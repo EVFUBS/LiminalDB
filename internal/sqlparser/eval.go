@@ -27,6 +27,15 @@ func (e *Evaluator) Execute(query string) (interface{}, error) {
 		return nil, fmt.Errorf("failed to parse query: %s", query)
 	}
 
+	result, err := e.executeStatement(stmt)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+func (e *Evaluator) executeStatement(stmt Statement) (interface{}, error) {
 	switch stmt := stmt.(type) {
 	case *SelectStatement:
 		return e.executeSelect(stmt)
@@ -45,7 +54,7 @@ func (e *Evaluator) Execute(query string) (interface{}, error) {
 	}
 }
 
-func (e *Evaluator) executeSelect(stmt *SelectStatement) (interface{}, error) {
+func (e *Evaluator) executeSelect(stmt *SelectStatement) (*db.QueryResult, error) {
 	data, err := e.selectData(stmt.TableName, stmt.Fields, stmt.Where)
 	if err != nil {
 		return nil, err
@@ -141,7 +150,7 @@ func (e *Evaluator) Evaluate(expr Expression, row []interface{}, columns []db.Co
 	}
 }
 
-func (e *Evaluator) selectData(tableName string, fields []string, where Expression) (interface{}, error) {
+func (e *Evaluator) selectData(tableName string, fields []string, where Expression) (*db.QueryResult, error) {
 	filter := func(row []interface{}, columns []db.Column) (bool, error) {
 		if where == nil {
 			return true, nil
@@ -232,8 +241,13 @@ func (e *Evaluator) deleteData(tableName string, where Expression) (interface{},
 }
 
 func (e *Evaluator) dropTable(tableName string) (interface{}, error) {
-	// TODO: Implement drop table
-	return nil, nil
+	err := e.operations.DropTable(tableName)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to drop table: %w", err)
+	}
+
+	return "Drop table successful", nil
 }
 
 func (e *Evaluator) describeTable(tableName string) (interface{}, error) {
