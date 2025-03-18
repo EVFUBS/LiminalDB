@@ -8,6 +8,61 @@ import (
 	"strings"
 )
 
+// Helper functions for table formatting
+func calculateColumnWidths(columns []db.Column, rows [][]interface{}) []int {
+	colWidths := make([]int, len(columns))
+	for i, col := range columns {
+		colWidths[i] = len(col.Name)
+		// Check data lengths
+		for _, row := range rows {
+			if i < len(row) {
+				valLen := len(fmt.Sprintf("%v", row[i]))
+				if valLen > colWidths[i] {
+					colWidths[i] = valLen
+				}
+			}
+		}
+	}
+	return colWidths
+}
+
+func writeTableHeader(sb *strings.Builder, colWidths []int) {
+	sb.WriteString("+")
+	for _, width := range colWidths {
+		sb.WriteString(strings.Repeat("-", width+2))
+		sb.WriteString("+")
+	}
+	sb.WriteString("\n")
+}
+
+func writeTableFooter(sb *strings.Builder, colWidths []int) {
+	sb.WriteString("+")
+	for _, width := range colWidths {
+		sb.WriteString(strings.Repeat("-", width+2))
+		sb.WriteString("+")
+	}
+	sb.WriteString("\n")
+}
+
+func writeColumnNames(sb *strings.Builder, columns []db.Column, colWidths []int) {
+	sb.WriteString("|")
+	for i, col := range columns {
+		sb.WriteString(fmt.Sprintf(" %-*s |", colWidths[i], col.Name))
+	}
+	sb.WriteString("\n")
+}
+
+func writeDataRow(sb *strings.Builder, row []interface{}, colWidths []int) {
+	sb.WriteString("|")
+	for i, val := range row {
+		if i < len(colWidths) {
+			sb.WriteString(fmt.Sprintf(" %-*v |", colWidths[i], formatValue(val)))
+		}
+	}
+	sb.WriteString("\n")
+}
+
+// Main REPL function
 func Repl() {
 	fmt.Println("Welcome to LiminalDB")
 	fmt.Println("Enter SQL commands, or type 'exit' to quit")
@@ -49,6 +104,7 @@ func Repl() {
 	}
 }
 
+// Result formatting functions
 func formatResult(result interface{}) string {
 	switch v := result.(type) {
 	case *db.Table:
@@ -70,63 +126,17 @@ func formatTableResult(table *db.Table) string {
 	}
 
 	var sb strings.Builder
+	colWidths := calculateColumnWidths(table.Metadata.Columns, table.Data)
 
-	// Calculate column widths
-	colWidths := make([]int, len(table.Metadata.Columns))
-	for i, col := range table.Metadata.Columns {
-		colWidths[i] = len(col.Name)
-		// Check data lengths
-		for _, row := range table.Data {
-			if i < len(row) {
-				valLen := len(fmt.Sprintf("%v", row[i]))
-				if valLen > colWidths[i] {
-					colWidths[i] = valLen
-				}
-			}
-		}
-	}
+	writeTableHeader(&sb, colWidths)
+	writeColumnNames(&sb, table.Metadata.Columns, colWidths)
+	writeTableFooter(&sb, colWidths)
 
-	// Print header
-	sb.WriteString("+")
-	for _, width := range colWidths {
-		sb.WriteString(strings.Repeat("-", width+2))
-		sb.WriteString("+")
-	}
-	sb.WriteString("\n|")
-
-	// Column names
-	for i, col := range table.Metadata.Columns {
-		sb.WriteString(fmt.Sprintf(" %-*s |", colWidths[i], col.Name))
-	}
-	sb.WriteString("\n+")
-
-	// Separator
-	for _, width := range colWidths {
-		sb.WriteString(strings.Repeat("-", width+2))
-		sb.WriteString("+")
-	}
-	sb.WriteString("\n")
-
-	// Data rows
 	for _, row := range table.Data {
-		sb.WriteString("|")
-		for i, val := range row {
-			if i < len(colWidths) {
-				sb.WriteString(fmt.Sprintf(" %-*v |", colWidths[i], formatValue(val)))
-			}
-		}
-		sb.WriteString("\n")
+		writeDataRow(&sb, row, colWidths)
 	}
 
-	// Bottom border
-	sb.WriteString("+")
-	for _, width := range colWidths {
-		sb.WriteString(strings.Repeat("-", width+2))
-		sb.WriteString("+")
-	}
-	sb.WriteString("\n")
-
-	// Row count
+	writeTableFooter(&sb, colWidths)
 	sb.WriteString(fmt.Sprintf("%d row(s) in set\n", len(table.Data)))
 
 	return sb.String()
@@ -139,6 +149,7 @@ func formatTableMetadata(metadata db.TableMetadata) string {
 	nameWidth := len("Field")
 	typeWidth := len("Type")
 	nullWidth := len("Null")
+	primaryWidth := len("Primary Key")
 
 	for _, col := range metadata.Columns {
 		if len(col.Name) > nameWidth {
@@ -151,41 +162,70 @@ func formatTableMetadata(metadata db.TableMetadata) string {
 	}
 
 	// Header
-	sb.WriteString(fmt.Sprintf("+%-*s+%-*s+%-*s+\n",
-		nameWidth+2, strings.Repeat("-", nameWidth+2),
-		typeWidth+2, strings.Repeat("-", typeWidth+2),
-		nullWidth+2, strings.Repeat("-", nullWidth+2)))
+	sb.WriteString("+")
+	sb.WriteString(strings.Repeat("-", nameWidth+2))
+	sb.WriteString("+")
+	sb.WriteString(strings.Repeat("-", typeWidth+2))
+	sb.WriteString("+")
+	sb.WriteString(strings.Repeat("-", nullWidth+2))
+	sb.WriteString("+")
+	sb.WriteString(strings.Repeat("-", primaryWidth+2))
+	sb.WriteString("+\n")
 
 	// Column headers
-	sb.WriteString(fmt.Sprintf("| %-*s | %-*s | %-*s |\n",
-		nameWidth, "Field",
-		typeWidth, "Type",
-		nullWidth, "Null"))
+	sb.WriteString("| ")
+	sb.WriteString(fmt.Sprintf("%-*s", nameWidth, "Field"))
+	sb.WriteString(" | ")
+	sb.WriteString(fmt.Sprintf("%-*s", typeWidth, "Type"))
+	sb.WriteString(" | ")
+	sb.WriteString(fmt.Sprintf("%-*s", nullWidth, "Null"))
+	sb.WriteString(" | ")
+	sb.WriteString(fmt.Sprintf("%-*s", primaryWidth, "Primary Key"))
+	sb.WriteString(" |\n")
 
 	// Separator
-	sb.WriteString(fmt.Sprintf("+%-*s+%-*s+%-*s+\n",
-		nameWidth+2, strings.Repeat("-", nameWidth+2),
-		typeWidth+2, strings.Repeat("-", typeWidth+2),
-		nullWidth+2, strings.Repeat("-", nullWidth+2)))
+	sb.WriteString("+")
+	sb.WriteString(strings.Repeat("-", nameWidth+2))
+	sb.WriteString("+")
+	sb.WriteString(strings.Repeat("-", typeWidth+2))
+	sb.WriteString("+")
+	sb.WriteString(strings.Repeat("-", nullWidth+2))
+	sb.WriteString("+")
+	sb.WriteString(strings.Repeat("-", primaryWidth+2))
+	sb.WriteString("+\n")
 
 	// Data rows
 	for _, col := range metadata.Columns {
-		nullable := "NO"
-		if col.IsNullable {
-			nullable = "YES"
+		nullable := "YES"
+		if !col.IsNullable {
+			nullable = "NO"
+		}
+		primary := "NO"
+		if col.IsPrimaryKey {
+			primary = "YES"
 		}
 
-		sb.WriteString(fmt.Sprintf("| %-*s | %-*s | %-*s |\n",
-			nameWidth, col.Name,
-			typeWidth, formatColumnType(col),
-			nullWidth, nullable))
+		sb.WriteString("| ")
+		sb.WriteString(fmt.Sprintf("%-*s", nameWidth, col.Name))
+		sb.WriteString(" | ")
+		sb.WriteString(fmt.Sprintf("%-*s", typeWidth, formatColumnType(col)))
+		sb.WriteString(" | ")
+		sb.WriteString(fmt.Sprintf("%-*s", nullWidth, nullable))
+		sb.WriteString(" | ")
+		sb.WriteString(fmt.Sprintf("%-*s", primaryWidth, primary))
+		sb.WriteString(" |\n")
 	}
 
 	// Bottom border
-	sb.WriteString(fmt.Sprintf("+%-*s+%-*s+%-*s+\n",
-		nameWidth+2, strings.Repeat("-", nameWidth+2),
-		typeWidth+2, strings.Repeat("-", typeWidth+2),
-		nullWidth+2, strings.Repeat("-", nullWidth+2)))
+	sb.WriteString("+")
+	sb.WriteString(strings.Repeat("-", nameWidth+2))
+	sb.WriteString("+")
+	sb.WriteString(strings.Repeat("-", typeWidth+2))
+	sb.WriteString("+")
+	sb.WriteString(strings.Repeat("-", nullWidth+2))
+	sb.WriteString("+")
+	sb.WriteString(strings.Repeat("-", primaryWidth+2))
+	sb.WriteString("+\n")
 
 	return sb.String()
 }
@@ -196,28 +236,23 @@ func formatQueryResult(result *db.QueryResult) string {
 	}
 
 	var sb strings.Builder
+	colWidths := calculateColumnWidths(result.Columns, result.Rows)
 
-	sb.WriteString(formatSeparator(result.Columns))
-
-	for i := range result.Columns {
-		sb.WriteString(fmt.Sprintf("| %-15s ", result.Columns[i].Name))
-	}
-	sb.WriteString("|\n")
-
-	sb.WriteString(formatSeparator(result.Columns))
+	writeTableHeader(&sb, colWidths)
+	writeColumnNames(&sb, result.Columns, colWidths)
+	writeTableFooter(&sb, colWidths)
 
 	for _, row := range result.Rows {
-		for _, value := range row {
-			sb.WriteString(fmt.Sprintf("| %-15v ", value))
-		}
-		sb.WriteString("|\n")
+		writeDataRow(&sb, row, colWidths)
 	}
 
-	sb.WriteString(formatSeparator(result.Columns))
+	writeTableFooter(&sb, colWidths)
+	sb.WriteString(fmt.Sprintf("%d row(s) in set\n", len(result.Rows)))
 
 	return sb.String()
 }
 
+// Utility functions
 func formatColumnType(col db.Column) string {
 	switch col.DataType {
 	case db.TypeString:
@@ -241,14 +276,4 @@ func formatValue(v interface{}) string {
 		return "NULL"
 	}
 	return fmt.Sprintf("%v", v)
-}
-
-func formatSeparator(columns []db.Column) string {
-	sb := strings.Builder{}
-	sb.WriteString("+")
-	for range columns {
-		sb.WriteString("-----------------+")
-	}
-	sb.WriteString("\n")
-	return sb.String()
 }

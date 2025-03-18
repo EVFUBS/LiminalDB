@@ -1,6 +1,7 @@
 package sqlparser
 
 import (
+	"LiminalDb/internal/db"
 	"fmt"
 	"strconv"
 )
@@ -18,7 +19,7 @@ func NewParser(l *Lexer) *Parser {
 		errors: []string{},
 	}
 	p.nextToken()
-	p.nextToken() // read two tokens, so curToken and peekToken are both set
+	p.nextToken()
 	return p
 }
 
@@ -39,7 +40,7 @@ type InsertStatement struct {
 
 type CreateTableStatement struct {
 	TableName string
-	Columns   []ColumnDefinition
+	Columns   []db.Column
 }
 
 type DeleteStatement struct {
@@ -125,14 +126,6 @@ func (l *Literal) GetValue() interface{} {
 	return l.Value
 }
 
-type ColumnDefinition struct {
-	Name     string
-	DataType TokenType
-	Length   int
-	Nullable bool
-}
-
-// Parsing
 func (p *Parser) nextToken() {
 	p.curToken = p.peekToken
 	p.peekToken = p.lexer.NextToken()
@@ -300,31 +293,38 @@ func (p *Parser) parseDescribeTableStatement() *DescribeTableStatement {
 	return stmt
 }
 
-func (p *Parser) parseColumnDefinitions() []ColumnDefinition {
-	columns := []ColumnDefinition{}
+func (p *Parser) parseColumnDefinitions() []db.Column {
+	columns := []db.Column{}
 
-	// Parse first column
 	if !p.expectPeek(IDENT) {
 		return nil
 	}
 
 	for {
-		col := ColumnDefinition{
-			Name:     p.curToken.Literal,
-			Nullable: true, // Default to nullable
+		col := db.Column{
+			Name:         p.curToken.Literal,
+			IsNullable:   true, // Default to nullable
+			IsPrimaryKey: false,
 		}
 
-		// Expect data type
 		if !p.expectPeek(INTTYPE) && !p.expectPeek(FLOATTYPE) &&
 			!p.expectPeek(STRINGTYPE) && !p.expectPeek(BOOLTYPE) {
 			return nil
 		}
-		col.DataType = p.curToken.Type
 
-		// Check for length specification
+		var dataType db.ColumnType
+		var err error
+		dataType, err = convertTokenTypeToColumnType(p.curToken.Type)
+		if err != nil {
+			p.errors = append(p.errors, err.Error())
+			return nil
+		}
+
+		col.DataType = dataType
+
 		if p.peekTokenIs(LPAREN) {
-			p.nextToken() // consume (
-			p.nextToken() // move to the number
+			p.nextToken()
+			p.nextToken()
 
 			if p.curToken.Type != INT {
 				p.errors = append(p.errors, "expected integer for length specification")
@@ -336,33 +336,39 @@ func (p *Parser) parseColumnDefinitions() []ColumnDefinition {
 				p.errors = append(p.errors, "invalid length specification")
 				return nil
 			}
-			col.Length = length
+
+			col.Length = uint16(length)
 
 			if !p.expectPeek(RPAREN) {
 				return nil
 			}
 		}
 
-		// Check for NULL/NOT NULL
 		if p.peekTokenIs(NOT) {
-			p.nextToken() // consume NOT
+			p.nextToken()
 			if !p.expectPeek(NULL) {
 				return nil
 			}
-			col.Nullable = false
+			col.IsNullable = false
 		} else if p.peekTokenIs(NULL) {
-			p.nextToken() // consume NULL
-			col.Nullable = true
+			p.nextToken()
+			col.IsNullable = true
+		}
+
+		if p.peekTokenIs(PRIMARY) {
+			p.nextToken()
+			if !p.expectPeek(KEY) {
+				return nil
+			}
+			col.IsPrimaryKey = true
 		}
 
 		columns = append(columns, col)
 
-		// If next token is not comma, break
 		if !p.peekTokenIs(COMMA) {
 			break
 		}
 
-		// Skip comma and continue to next column
 		p.nextToken()
 		if !p.expectPeek(IDENT) {
 			return nil

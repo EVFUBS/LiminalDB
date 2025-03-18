@@ -187,26 +187,10 @@ func (e *Evaluator) insertData(tableName string, fields []string, values [][]Exp
 	return "Insert successful", nil
 }
 
-func (e *Evaluator) createTable(tableName string, columns []ColumnDefinition) (interface{}, error) {
-	dbColumns := make([]db.Column, len(columns))
-	for i, col := range columns {
-
-		columnType, err := convertTokenTypeToColumnType(col.DataType)
-		if err != nil {
-			return nil, err
-		}
-
-		dbColumns[i] = db.Column{
-			Name:       col.Name,
-			DataType:   columnType,
-			Length:     uint16(col.Length),
-			IsNullable: col.Nullable,
-		}
-	}
-
+func (e *Evaluator) createTable(tableName string, columns []db.Column) (interface{}, error) {
 	metadata := db.TableMetadata{
 		Name:    tableName,
-		Columns: dbColumns,
+		Columns: columns,
 	}
 
 	err := e.operations.CreateTable(metadata)

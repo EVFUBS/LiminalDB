@@ -44,18 +44,28 @@ type TableMetadata struct {
 	ColumnCount int64
 	Columns     []Column
 	RowCount    int64
-	DataOffset  uint32 // Where actual data begins in the file
+	DataOffset  uint32
+	ForeignKeys []ForeignKeyConstraint
 }
 
-// Column definition
 type Column struct {
-	Name       string
-	DataType   ColumnType
-	Length     uint16 // For variable-length types like strings
-	IsNullable bool
+	Name         string
+	DataType     ColumnType
+	Length       uint16 // For variable-length types like strings
+	IsNullable   bool
+	IsPrimaryKey bool
 }
 
-// Custom data types enum
+type ForeignKeyConstraint struct {
+	ReferencedTable   string
+	ReferencedColumns []ForeignKeyReference
+}
+
+type ForeignKeyReference struct {
+	ColumnName           string
+	ReferencedColumnName string
+}
+
 type ColumnType int8
 
 type QueryResult struct {
@@ -76,6 +86,7 @@ func (m *TableMetadata) ValidateMetadata() error {
 		return errors.New("column count does not match number of columns")
 	}
 
+	hasPrimaryKey := false
 	for i, col := range m.Columns {
 		if col.Name == "" {
 			return errors.New("column name cannot be empty")
@@ -90,6 +101,25 @@ func (m *TableMetadata) ValidateMetadata() error {
 				return errors.New("duplicate column name")
 			}
 		}
+
+		if col.IsPrimaryKey {
+			hasPrimaryKey = true
+			if col.IsNullable {
+				return errors.New("primary key column cannot be nullable")
+			}
+		}
+	}
+
+	for _, fk := range m.ForeignKeys {
+		for _, ref := range fk.ReferencedColumns {
+			if ref.ColumnName == "" || ref.ReferencedColumnName == "" {
+				return errors.New("foreign key column name cannot be empty")
+			}
+		}
+	}
+
+	if !hasPrimaryKey {
+		return errors.New("table must have at least one primary key")
 	}
 
 	return nil

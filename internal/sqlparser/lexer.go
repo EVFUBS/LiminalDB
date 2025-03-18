@@ -143,42 +143,52 @@ const (
 	RPAREN    = ")"
 
 	// Keywords
-	SELECT = "SELECT"
-	FROM   = "FROM"
-	WHERE  = "WHERE"
-	INSERT = "INSERT"
-	INTO   = "INTO"
-	VALUES = "VALUES"
-	CREATE = "CREATE"
-	TABLE  = "TABLE"
-	DROP   = "DROP"
-	NULL   = "NULL"
-	NOT    = "NOT"
-	DELETE = "DELETE"
-	DESC   = "DESC"
+	SELECT     = "SELECT"
+	FROM       = "FROM"
+	WHERE      = "WHERE"
+	INSERT     = "INSERT"
+	INTO       = "INTO"
+	VALUES     = "VALUES"
+	CREATE     = "CREATE"
+	TABLE      = "TABLE"
+	DROP       = "DROP"
+	NULL       = "NULL"
+	NOT        = "NOT"
+	DELETE     = "DELETE"
+	DESC       = "DESC"
+	PRIMARY    = "PRIMARY"
+	KEY        = "KEY"
+	FOREIGN    = "FOREIGN"
+	REFERENCES = "REFERENCES"
+	ON         = "ON"
 )
 
 var keywords = map[string]TokenType{
-	"select": SELECT,
-	"from":   FROM,
-	"where":  WHERE,
-	"insert": INSERT,
-	"into":   INTO,
-	"values": VALUES,
-	"true":   BOOL,
-	"false":  BOOL,
-	"create": CREATE,
-	"table":  TABLE,
-	"drop":   DROP,
-	"int":    INTTYPE,
-	"float":  FLOATTYPE,
-	"bool":   BOOLTYPE,
-	"string": STRINGTYPE,
-	"null":   NULL,
-	"not":    NOT,
-	"delete": DELETE,
-	"desc":   DESC,
-	"*":      ALL,
+	"select":     SELECT,
+	"from":       FROM,
+	"where":      WHERE,
+	"insert":     INSERT,
+	"into":       INTO,
+	"values":     VALUES,
+	"true":       BOOL,
+	"false":      BOOL,
+	"create":     CREATE,
+	"table":      TABLE,
+	"drop":       DROP,
+	"int":        INTTYPE,
+	"float":      FLOATTYPE,
+	"bool":       BOOLTYPE,
+	"string":     STRINGTYPE,
+	"null":       NULL,
+	"not":        NOT,
+	"delete":     DELETE,
+	"desc":       DESC,
+	"*":          ALL,
+	"primary":    PRIMARY,
+	"key":        KEY,
+	"foreign":    FOREIGN,
+	"references": REFERENCES,
+	"on":         ON,
 }
 
 func LookupIdent(ident string) TokenType {
