@@ -1,19 +1,21 @@
 package sqlparser
 
 import (
-	"LiminalDb/internal/db"
+	"LiminalDb/internal/database"
+	"LiminalDb/internal/storedproc"
 	"fmt"
+	"strings"
 )
 
 type Evaluator struct {
 	parser     *Parser
-	operations db.Operations
+	operations database.Operations
 }
 
 func NewEvaluator(parser *Parser) *Evaluator {
 	return &Evaluator{
 		parser:     parser,
-		operations: &db.OperationsImpl{},
+		operations: &database.OperationsImpl{},
 	}
 }
 
@@ -49,12 +51,18 @@ func (e *Evaluator) executeStatement(stmt Statement) (interface{}, error) {
 		return e.executeDropTable(stmt)
 	case *DescribeTableStatement:
 		return e.executeDescribeTable(stmt)
+	case *CreateProcedureStatement:
+		return e.executeCreateProcedure(stmt)
+	case *AlterProcedureStatement:
+		return e.executeAlterProcedure(stmt)
+	case *ExecStatement:
+		return e.executeStoredProcedure(stmt)
 	default:
 		return nil, fmt.Errorf("unsupported statement type")
 	}
 }
 
-func (e *Evaluator) executeSelect(stmt *SelectStatement) (*db.QueryResult, error) {
+func (e *Evaluator) executeSelect(stmt *SelectStatement) (*database.QueryResult, error) {
 	data, err := e.selectData(stmt.TableName, stmt.Fields, stmt.Where)
 	if err != nil {
 		return nil, err
@@ -102,7 +110,79 @@ func (e *Evaluator) executeDescribeTable(stmt *DescribeTableStatement) (interfac
 	return data, nil
 }
 
-func (e *Evaluator) Evaluate(expr Expression, row []interface{}, columns []db.Column) (interface{}, error) {
+func (e *Evaluator) executeCreateProcedure(stmt *CreateProcedureStatement) (interface{}, error) {
+	proc := storedproc.NewStoredProc(
+		stmt.Name,
+		stmt.Body,
+		stmt.Parameters,
+		stmt.Description,
+	)
+
+	err := proc.WriteToFile(stmt.Name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stored procedure: %w", err)
+	}
+
+	return "Stored procedure created successfully", nil
+}
+
+func (e *Evaluator) executeAlterProcedure(stmt *AlterProcedureStatement) (interface{}, error) {
+	proc := storedproc.NewStoredProc(
+		stmt.Name,
+		stmt.Body,
+		stmt.Parameters,
+		stmt.Description,
+	)
+
+	err := proc.WriteToFile(stmt.Name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to alter stored procedure: %w", err)
+	}
+
+	return "Stored procedure altered successfully", nil
+}
+
+func (e *Evaluator) executeStoredProcedure(stmt *ExecStatement) (interface{}, error) {
+	proc := &storedproc.StoredProc{}
+	err := proc.ReadFromFile(stmt.Name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read stored procedure: %w", err)
+	}
+
+	if len(stmt.Parameters) != len(proc.Parameters) {
+		return nil, fmt.Errorf("parameter count mismatch: expected %d, got %d",
+			len(proc.Parameters), len(stmt.Parameters))
+	}
+
+	paramValues := make(map[string]interface{})
+	for i, param := range proc.Parameters {
+		paramValues[param.Name] = stmt.Parameters[i].GetValue()
+	}
+
+	processedBody := proc.Body
+	for name, value := range paramValues {
+		var valueStr string
+		switch v := value.(type) {
+		case string:
+			valueStr = "'" + v + "'"
+		default:
+			valueStr = fmt.Sprintf("%v", v)
+		}
+
+		processedBody = strings.Replace(processedBody, name, valueStr, -1)
+	}
+
+	proc.Body = processedBody
+	result, err := e.Execute(proc.Body)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute stored procedure: %w", err)
+	}
+
+	return result, nil
+}
+
+func (e *Evaluator) Evaluate(expr Expression, row []interface{}, columns []database.Column) (interface{}, error) {
 	switch expr := expr.(type) {
 	case *Identifier:
 		for i, col := range columns {
@@ -150,8 +230,8 @@ func (e *Evaluator) Evaluate(expr Expression, row []interface{}, columns []db.Co
 	}
 }
 
-func (e *Evaluator) selectData(tableName string, fields []string, where Expression) (*db.QueryResult, error) {
-	filter := func(row []interface{}, columns []db.Column) (bool, error) {
+func (e *Evaluator) selectData(tableName string, fields []string, where Expression) (*database.QueryResult, error) {
+	filter := func(row []interface{}, columns []database.Column) (bool, error) {
 		if where == nil {
 			return true, nil
 		}
@@ -187,8 +267,8 @@ func (e *Evaluator) insertData(tableName string, fields []string, values [][]Exp
 	return "Insert successful", nil
 }
 
-func (e *Evaluator) createTable(tableName string, columns []db.Column) (interface{}, error) {
-	metadata := db.TableMetadata{
+func (e *Evaluator) createTable(tableName string, columns []database.Column) (interface{}, error) {
+	metadata := database.TableMetadata{
 		Name:    tableName,
 		Columns: columns,
 	}
@@ -202,7 +282,7 @@ func (e *Evaluator) createTable(tableName string, columns []db.Column) (interfac
 }
 
 func (e *Evaluator) deleteData(tableName string, where Expression) (interface{}, error) {
-	filter := func(row []interface{}, columns []db.Column) (bool, error) {
+	filter := func(row []interface{}, columns []database.Column) (bool, error) {
 		if where == nil {
 			return true, nil
 		}
@@ -242,16 +322,16 @@ func (e *Evaluator) describeTable(tableName string) (interface{}, error) {
 	return metadata, nil
 }
 
-func convertTokenTypeToColumnType(tokenType TokenType) (db.ColumnType, error) {
+func convertTokenTypeToColumnType(tokenType TokenType) (database.ColumnType, error) {
 	switch tokenType {
 	case INTTYPE:
-		return db.TypeInteger64, nil
+		return database.TypeInteger64, nil
 	case FLOATTYPE:
-		return db.TypeFloat64, nil
+		return database.TypeFloat64, nil
 	case STRINGTYPE:
-		return db.TypeString, nil
+		return database.TypeString, nil
 	case BOOLTYPE:
-		return db.TypeBoolean, nil
+		return database.TypeBoolean, nil
 	}
 
 	return 0, fmt.Errorf("unsupported token type: %s", tokenType)

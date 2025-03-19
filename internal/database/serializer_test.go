@@ -1,0 +1,272 @@
+package database
+
+import (
+	"bytes"
+	"testing"
+	"time"
+)
+
+func TestSerializeHeader(t *testing.T) {
+	header := FileHeader{
+		Magic:   MagicNumber,
+		Version: CurrentVersion,
+	}
+
+	serializer := BinarySerializer{}
+	data, err := serializer.SerializeHeader(header)
+	if err != nil {
+		t.Fatalf("Failed to serialize header: %v", err)
+	}
+
+	reader := bytes.NewReader(data)
+	deserialized, err := serializer.DeserializeHeader(reader)
+	if err != nil {
+		t.Fatalf("Failed to deserialize header: %v", err)
+	}
+
+	if deserialized.Magic != header.Magic {
+		t.Errorf("Magic number mismatch: got %v, want %v", deserialized.Magic, header.Magic)
+	}
+	if deserialized.Version != header.Version {
+		t.Errorf("Version mismatch: got %v, want %v", deserialized.Version, header.Version)
+	}
+}
+
+func TestSerializeMetadata(t *testing.T) {
+	metadata := TableMetadata{
+		Name:        "test_table",
+		ColumnCount: 3,
+		Columns: []Column{
+			{
+				Name:         "id",
+				DataType:     TypeInteger64,
+				IsNullable:   false,
+				IsPrimaryKey: true,
+			},
+			{
+				Name:       "name",
+				DataType:   TypeString,
+				Length:     100,
+				IsNullable: true,
+			},
+			{
+				Name:       "age",
+				DataType:   TypeInteger64,
+				IsNullable: false,
+			},
+		},
+	}
+
+	serializer := BinarySerializer{}
+	data, _, err := serializer.SerializeMetadata(metadata)
+	if err != nil {
+		t.Fatalf("Failed to serialize metadata: %v", err)
+	}
+
+	reader := bytes.NewReader(data)
+	deserialized, err := serializer.DeserializeMetadata(reader)
+	if err != nil {
+		t.Fatalf("Failed to deserialize metadata: %v", err)
+	}
+
+	if deserialized.Name != metadata.Name {
+		t.Errorf("Table name mismatch: got %v, want %v", deserialized.Name, metadata.Name)
+	}
+	if deserialized.ColumnCount != metadata.ColumnCount {
+		t.Errorf("Column count mismatch: got %v, want %v", deserialized.ColumnCount, metadata.ColumnCount)
+	}
+	if len(deserialized.Columns) != len(metadata.Columns) {
+		t.Errorf("Columns length mismatch: got %v, want %v", len(deserialized.Columns), len(metadata.Columns))
+	}
+
+	// Test column properties
+	for i, col := range deserialized.Columns {
+		if col.Name != metadata.Columns[i].Name {
+			t.Errorf("Column %d name mismatch: got %v, want %v", i, col.Name, metadata.Columns[i].Name)
+		}
+		if col.DataType != metadata.Columns[i].DataType {
+			t.Errorf("Column %d data type mismatch: got %v, want %v", i, col.DataType, metadata.Columns[i].DataType)
+		}
+		if col.Length != metadata.Columns[i].Length {
+			t.Errorf("Column %d length mismatch: got %v, want %v", i, col.Length, metadata.Columns[i].Length)
+		}
+		if col.IsNullable != metadata.Columns[i].IsNullable {
+			t.Errorf("Column %d nullable mismatch: got %v, want %v", i, col.IsNullable, metadata.Columns[i].IsNullable)
+		}
+		if col.IsPrimaryKey != metadata.Columns[i].IsPrimaryKey {
+			t.Errorf("Column %d primary key mismatch: got %v, want %v", i, col.IsPrimaryKey, metadata.Columns[i].IsPrimaryKey)
+		}
+	}
+}
+
+func TestSerializeRow(t *testing.T) {
+	columns := []Column{
+		{Name: "id", DataType: TypeInteger64},
+		{Name: "name", DataType: TypeString, Length: 100},
+		{Name: "age", DataType: TypeInteger64},
+		{Name: "active", DataType: TypeBoolean},
+		{Name: "created_at", DataType: TypeTimestamp},
+	}
+
+	now := time.Now()
+	row := []interface{}{
+		int64(1),
+		"John Doe",
+		int64(30),
+		true,
+		now,
+	}
+
+	serializer := BinarySerializer{}
+	data, err := serializer.SerializeRow(row, columns)
+	if err != nil {
+		t.Fatalf("Failed to serialize row: %v", err)
+	}
+
+	reader := bytes.NewReader(data)
+	deserialized, err := serializer.DeserializeRow(reader, columns)
+	if err != nil {
+		t.Fatalf("Failed to deserialize row: %v", err)
+	}
+
+	if len(deserialized) != len(row) {
+		t.Fatalf("Row length mismatch: got %v, want %v", len(deserialized), len(row))
+	}
+
+	// Test each value
+	if deserialized[0].(int64) != row[0].(int64) {
+		t.Errorf("ID mismatch: got %v, want %v", deserialized[0], row[0])
+	}
+	if deserialized[1].(string) != row[1].(string) {
+		t.Errorf("Name mismatch: got %v, want %v", deserialized[1], row[1])
+	}
+	if deserialized[2].(int64) != row[2].(int64) {
+		t.Errorf("Age mismatch: got %v, want %v", deserialized[2], row[2])
+	}
+	if deserialized[3].(bool) != row[3].(bool) {
+		t.Errorf("Active mismatch: got %v, want %v", deserialized[3], row[3])
+	}
+	// Compare timestamps with a small tolerance
+	deserializedTime := deserialized[4].(time.Time)
+	originalTime := row[4].(time.Time)
+	if deserializedTime.Unix() != originalTime.Unix() {
+		t.Errorf("Created at mismatch: got %v, want %v", deserializedTime, originalTime)
+	}
+}
+
+func TestSerializeTable(t *testing.T) {
+	table := Table{
+		Header: FileHeader{
+			Magic:   MagicNumber,
+			Version: CurrentVersion,
+		},
+		Metadata: TableMetadata{
+			Name:        "test_table",
+			ColumnCount: 3,
+			Columns: []Column{
+				{
+					Name:         "id",
+					DataType:     TypeInteger64,
+					IsNullable:   false,
+					IsPrimaryKey: true,
+				},
+				{
+					Name:       "name",
+					DataType:   TypeString,
+					Length:     100,
+					IsNullable: true,
+				},
+				{
+					Name:       "age",
+					DataType:   TypeInteger64,
+					IsNullable: false,
+				},
+			},
+		},
+		Data: [][]interface{}{
+			{int64(1), "John Doe", int64(30)},
+			{int64(2), "Jane Smith", int64(25)},
+		},
+	}
+
+	serializer := BinarySerializer{}
+	data, err := serializer.SerializeTable(table)
+	if err != nil {
+		t.Fatalf("Failed to serialize table: %v", err)
+	}
+
+	deserialized, err := serializer.DeserializeTable(data)
+	if err != nil {
+		t.Fatalf("Failed to deserialize table: %v", err)
+	}
+
+	// Test header
+	if deserialized.Header.Magic != table.Header.Magic {
+		t.Errorf("Magic number mismatch: got %v, want %v", deserialized.Header.Magic, table.Header.Magic)
+	}
+	if deserialized.Header.Version != table.Header.Version {
+		t.Errorf("Version mismatch: got %v, want %v", deserialized.Header.Version, table.Header.Version)
+	}
+
+	// Test metadata
+	if deserialized.Metadata.Name != table.Metadata.Name {
+		t.Errorf("Table name mismatch: got %v, want %v", deserialized.Metadata.Name, table.Metadata.Name)
+	}
+	if deserialized.Metadata.ColumnCount != table.Metadata.ColumnCount {
+		t.Errorf("Column count mismatch: got %v, want %v", deserialized.Metadata.ColumnCount, table.Metadata.ColumnCount)
+	}
+
+	// Test data
+	if len(deserialized.Data) != len(table.Data) {
+		t.Fatalf("Data length mismatch: got %v, want %v", len(deserialized.Data), len(table.Data))
+	}
+
+	for i, row := range deserialized.Data {
+		if len(row) != len(table.Data[i]) {
+			t.Fatalf("Row %d length mismatch: got %v, want %v", i, len(row), len(table.Data[i]))
+		}
+
+		for j, val := range row {
+			switch v := val.(type) {
+			case int64:
+				if v != table.Data[i][j].(int64) {
+					t.Errorf("Row %d, Column %d mismatch: got %v, want %v", i, j, v, table.Data[i][j])
+				}
+			case string:
+				if v != table.Data[i][j].(string) {
+					t.Errorf("Row %d, Column %d mismatch: got %v, want %v", i, j, v, table.Data[i][j])
+				}
+			default:
+				t.Errorf("Unexpected type in row %d, column %d: %T", i, j, val)
+			}
+		}
+	}
+}
+
+func TestInvalidDataTypes(t *testing.T) {
+	columns := []Column{
+		{Name: "id", DataType: TypeInteger64},
+	}
+
+	// Test invalid data type
+	row := []interface{}{"not an integer"}
+	serializer := BinarySerializer{}
+	_, err := serializer.SerializeRow(row, columns)
+	if err == nil {
+		t.Error("Expected error for invalid data type, got nil")
+	}
+}
+
+func TestStringLengthExceeded(t *testing.T) {
+	columns := []Column{
+		{Name: "name", DataType: TypeString, Length: 5},
+	}
+
+	// Test string exceeding length
+	row := []interface{}{"too long string"}
+	serializer := BinarySerializer{}
+	_, err := serializer.SerializeRow(row, columns)
+	if err == nil {
+		t.Error("Expected error for string exceeding length, got nil")
+	}
+}

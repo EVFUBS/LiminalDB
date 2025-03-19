@@ -1,7 +1,7 @@
 package sqlparser
 
 import (
-	"LiminalDb/internal/db"
+	"LiminalDb/internal/database"
 	"bufio"
 	"fmt"
 	"os"
@@ -9,7 +9,7 @@ import (
 )
 
 // Helper functions for table formatting
-func calculateColumnWidths(columns []db.Column, rows [][]interface{}) []int {
+func calculateColumnWidths(columns []database.Column, rows [][]interface{}) []int {
 	colWidths := make([]int, len(columns))
 	for i, col := range columns {
 		colWidths[i] = len(col.Name)
@@ -44,7 +44,7 @@ func writeTableFooter(sb *strings.Builder, colWidths []int) {
 	sb.WriteString("\n")
 }
 
-func writeColumnNames(sb *strings.Builder, columns []db.Column, colWidths []int) {
+func writeColumnNames(sb *strings.Builder, columns []database.Column, colWidths []int) {
 	sb.WriteString("|")
 	for i, col := range columns {
 		sb.WriteString(fmt.Sprintf(" %-*s |", colWidths[i], col.Name))
@@ -107,11 +107,11 @@ func Repl() {
 // Result formatting functions
 func formatResult(result interface{}) string {
 	switch v := result.(type) {
-	case *db.Table:
+	case *database.Table:
 		return formatTableResult(v)
-	case db.TableMetadata:
+	case database.TableMetadata:
 		return formatTableMetadata(v)
-	case *db.QueryResult:
+	case *database.QueryResult:
 		return formatQueryResult(v)
 	case string:
 		return v // Already formatted messages like "Insert successful"
@@ -120,7 +120,7 @@ func formatResult(result interface{}) string {
 	}
 }
 
-func formatTableResult(table *db.Table) string {
+func formatTableResult(table *database.Table) string {
 	if len(table.Data) == 0 {
 		return "Empty set"
 	}
@@ -142,7 +142,7 @@ func formatTableResult(table *db.Table) string {
 	return sb.String()
 }
 
-func formatTableMetadata(metadata db.TableMetadata) string {
+func formatTableMetadata(metadata database.TableMetadata) string {
 	var sb strings.Builder
 
 	// Calculate column widths
@@ -230,7 +230,7 @@ func formatTableMetadata(metadata db.TableMetadata) string {
 	return sb.String()
 }
 
-func formatQueryResult(result *db.QueryResult) string {
+func formatQueryResult(result *database.QueryResult) string {
 	if len(result.Rows) == 0 {
 		return "No rows found"
 	}
@@ -253,18 +253,18 @@ func formatQueryResult(result *db.QueryResult) string {
 }
 
 // Utility functions
-func formatColumnType(col db.Column) string {
+func formatColumnType(col database.Column) string {
 	switch col.DataType {
-	case db.TypeString:
+	case database.TypeString:
 		if col.Length > 0 {
 			return fmt.Sprintf("STRING(%d)", col.Length)
 		}
 		return "STRING"
-	case db.TypeInteger64:
+	case database.TypeInteger64:
 		return "INT"
-	case db.TypeFloat64:
+	case database.TypeFloat64:
 		return "FLOAT"
-	case db.TypeBoolean:
+	case database.TypeBoolean:
 		return "BOOL"
 	default:
 		return "UNKNOWN"

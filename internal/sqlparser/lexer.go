@@ -31,6 +31,11 @@ func (l *Lexer) NextToken() Token {
 	l.skipWhitespace()
 
 	switch l.ch {
+	case '@':
+		l.readChar()
+		tok.Type = VARIABLE
+		tok.Literal = "@" + l.readIdentifier()
+		return tok
 	case '=':
 		tok = newToken(ASSIGN, l.ch)
 	case ';':
@@ -161,6 +166,17 @@ const (
 	FOREIGN    = "FOREIGN"
 	REFERENCES = "REFERENCES"
 	ON         = "ON"
+
+	// Stored Procedure Keywords
+	PROCEDURE = "PROCEDURE"
+	ALTER     = "ALTER"
+	AS        = "AS"
+	BEGIN     = "BEGIN"
+	END       = "END"
+	EXEC      = "EXEC"
+
+	// Variables
+	VARIABLE = "@" // For variables like @user_id
 )
 
 var keywords = map[string]TokenType{
@@ -189,6 +205,13 @@ var keywords = map[string]TokenType{
 	"foreign":    FOREIGN,
 	"references": REFERENCES,
 	"on":         ON,
+	"procedure":  PROCEDURE,
+	"alter":      ALTER,
+	"as":         AS,
+	"begin":      BEGIN,
+	"end":        END,
+	"exec":       EXEC,
+	"variable":   VARIABLE,
 }
 
 func LookupIdent(ident string) TokenType {

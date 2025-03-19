@@ -1,4 +1,4 @@
-package db
+package database
 
 type DBError struct {
 	Code    int
