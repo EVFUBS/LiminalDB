@@ -1,6 +1,7 @@
 package database
 
 import (
+	"LiminalDb/internal/logger"
 	"fmt"
 	"os"
 	"strings"
@@ -23,6 +24,7 @@ type OperationsImpl struct {
 }
 
 func (o *OperationsImpl) CreateTable(metadata TableMetadata) error {
+	logger.Info("Creating table: %s", metadata.Name)
 
 	table := Table{
 		Header: FileHeader{
@@ -35,29 +37,43 @@ func (o *OperationsImpl) CreateTable(metadata TableMetadata) error {
 
 	err := o.serializer.WriteTableToFile(table, metadata.Name)
 	if err != nil {
+		logger.Error("Failed to create table %s: %v", metadata.Name, err)
 		return err
 	}
 
+	logger.Info("Table %s created successfully", metadata.Name)
 	return nil
 }
 
 func (o *OperationsImpl) DropTable(tableName string) error {
+	logger.Info("Dropping table: %s", tableName)
+
 	err := os.Remove(getTableFilePath(tableName))
 	if err != nil {
+		logger.Error("Failed to drop table %s: %v", tableName, err)
 		return err
 	}
+
+	logger.Info("Table %s dropped successfully", tableName)
 	return nil
 }
 
 func (o *OperationsImpl) ReadMetadata(filename string) (TableMetadata, error) {
+	logger.Debug("Reading metadata for table: %s", filename)
+
 	table, err := o.serializer.ReadTableFromFile(filename)
 	if err != nil {
+		logger.Error("Failed to read metadata for table %s: %v", filename, err)
 		return TableMetadata{}, err
 	}
+
+	logger.Debug("Successfully read metadata for table %s", filename)
 	return table.Metadata, nil
 }
 
 func (o *OperationsImpl) WriteRows(tableName string, data [][]interface{}) error {
+	logger.Info("Writing %d rows to table: %s", len(data), tableName)
+
 	table, err := o.serializer.ReadTableFromFile(tableName)
 	if err != nil {
 		return err
@@ -146,8 +162,11 @@ func (o *OperationsImpl) writeForeignKeyCheck(table Table, newRow []interface{})
 }
 
 func (o *OperationsImpl) ReadRows(tableName string, fields []string, filter func([]interface{}, []Column) (bool, error)) (*QueryResult, error) {
+	logger.Debug("Reading rows from table: %s", tableName)
+
 	table, err := o.serializer.ReadTableFromFile(tableName)
 	if err != nil {
+		logger.Error("Failed to read rows from table %s: %v", tableName, err)
 		return &QueryResult{}, err
 	}
 
@@ -159,6 +178,7 @@ func (o *OperationsImpl) ReadRows(tableName string, fields []string, filter func
 		selectedRow, err := o.selectRowFields(row, fields, table, filter)
 
 		if err != nil {
+			logger.Error("Failed to select row fields from table %s: %v", tableName, err)
 			return nil, err
 		}
 
@@ -169,6 +189,7 @@ func (o *OperationsImpl) ReadRows(tableName string, fields []string, filter func
 		result.Rows = append(result.Rows, selectedRow)
 	}
 
+	logger.Debug("Successfully read %d rows from table %s", len(result.Rows), tableName)
 	return result, nil
 }
 
@@ -208,6 +229,8 @@ func (o *OperationsImpl) selectRowFields(row []interface{}, fields []string, tab
 }
 
 func (o *OperationsImpl) DeleteRows(tableName string, filter func([]interface{}, []Column) (bool, error)) (int64, error) {
+	logger.Info("Deleting rows from table: %s", tableName)
+
 	table, err := o.serializer.ReadTableFromFile(tableName)
 	if err != nil {
 		return 0, err
@@ -241,6 +264,7 @@ func (o *OperationsImpl) DeleteRows(tableName string, filter func([]interface{},
 		}
 	}
 
+	logger.Info("Successfully deleted %d rows from table %s", deletedCount, tableName)
 	return deletedCount, nil
 }
 

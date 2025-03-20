@@ -1,4 +1,4 @@
-package sqlparser
+package interpreter
 
 import (
 	"LiminalDb/internal/database"
@@ -178,6 +178,7 @@ func (p *Parser) ParseStatement() Statement {
 	case EXEC:
 		return p.parseExecStatement()
 	default:
+		p.peekError(p.curToken.Type)
 		return nil
 	}
 }
@@ -257,6 +258,7 @@ func (p *Parser) parseCreateStatement() Statement {
 	case "PROCEDURE":
 		return p.parseCreateProcedureStatement()
 	default:
+		p.peekError(p.curToken.Type)
 		return nil
 	}
 }
@@ -351,7 +353,6 @@ func (p *Parser) parseCreateProcedureStatement() *CreateProcedureStatement {
 	}
 	stmt.Name = p.curToken.Literal
 
-	// Parse parameters if they exist
 	if p.peekTokenIs(LPAREN) {
 		p.nextToken()
 		stmt.Parameters = p.parseColumnDefinitions()
@@ -360,29 +361,12 @@ func (p *Parser) parseCreateProcedureStatement() *CreateProcedureStatement {
 		}
 	}
 
-	// Skip AS and BEGIN keywords
-	if !p.expectPeek(AS) {
+	body, ok := p.parseProcedureBody()
+	if !ok {
 		return nil
 	}
-	if !p.expectPeek(BEGIN) {
-		return nil
-	}
+	stmt.Body = body
 
-	// Capture everything until END
-	var bodyBuilder strings.Builder
-	for {
-		p.nextToken()
-		if p.curTokenIs(END) {
-			break
-		}
-		if p.curToken.Type == EOF {
-			return nil
-		}
-		bodyBuilder.WriteString(p.curToken.Literal)
-		bodyBuilder.WriteString(" ")
-	}
-
-	stmt.Body = bodyBuilder.String()
 	return stmt
 }
 
@@ -394,7 +378,6 @@ func (p *Parser) parseAlterProcedureStatement() *AlterProcedureStatement {
 	}
 	stmt.Name = p.curToken.Literal
 
-	// Parse parameters if they exist
 	if p.peekTokenIs(LPAREN) {
 		p.nextToken()
 		p.nextToken()
@@ -404,15 +387,23 @@ func (p *Parser) parseAlterProcedureStatement() *AlterProcedureStatement {
 		}
 	}
 
-	// Skip AS and BEGIN keywords
-	if !p.expectPeek(AS) {
+	body, ok := p.parseProcedureBody()
+	if !ok {
 		return nil
+	}
+	stmt.Body = body
+
+	return stmt
+}
+
+func (p *Parser) parseProcedureBody() (string, bool) {
+	if !p.expectPeek(AS) {
+		return "", false
 	}
 	if !p.expectPeek(BEGIN) {
-		return nil
+		return "", false
 	}
 
-	// Capture everything until END
 	var bodyBuilder strings.Builder
 	for {
 		p.nextToken()
@@ -420,13 +411,117 @@ func (p *Parser) parseAlterProcedureStatement() *AlterProcedureStatement {
 			break
 		}
 		if p.curToken.Type == EOF {
-			return nil
+			return "", false
 		}
+
+		stmt := p.ParseStatement()
+		if stmt == nil {
+			return "", false
+		}
+
 		bodyBuilder.WriteString(p.curToken.Literal)
+		bodyBuilder.WriteString(" ")
+
+		if p.peekTokenIs(SEMICOLON) {
+			p.nextToken()
+			bodyBuilder.WriteString("; ")
+		}
 	}
 
-	stmt.Body = bodyBuilder.String()
-	return stmt
+	return bodyBuilder.String(), true
+}
+
+func (p *Parser) parseColumnDefinitions() []database.Column {
+	columns := []database.Column{}
+
+	if !p.expectPeek(IDENT) && !p.expectPeek(VARIABLE) {
+		return nil
+	}
+
+	for {
+		col := p.parseColumnDefinition()
+		if col == nil {
+			return nil
+		}
+		columns = append(columns, *col)
+
+		if !p.peekTokenIs(COMMA) {
+			break
+		}
+
+		p.nextToken()
+		if !p.expectPeek(IDENT) {
+			return nil
+		}
+	}
+
+	return columns
+}
+
+func (p *Parser) parseColumnDefinition() *database.Column {
+	col := &database.Column{
+		Name:         p.curToken.Literal,
+		IsNullable:   true,
+		IsPrimaryKey: false,
+	}
+
+	if !p.expectPeek(INTTYPE) && !p.expectPeek(FLOATTYPE) &&
+		!p.expectPeek(STRINGTYPE) && !p.expectPeek(BOOLTYPE) {
+		return nil
+	}
+
+	var dataType database.ColumnType
+	var err error
+	dataType, err = convertTokenTypeToColumnType(p.curToken.Type)
+	if err != nil {
+		p.errors = append(p.errors, err.Error())
+		return nil
+	}
+
+	col.DataType = dataType
+
+	if p.peekTokenIs(LPAREN) {
+		p.nextToken()
+		p.nextToken()
+
+		if p.curToken.Type != INT {
+			p.errors = append(p.errors, "expected integer for length specification")
+			return nil
+		}
+
+		length, err := strconv.Atoi(p.curToken.Literal)
+		if err != nil {
+			p.errors = append(p.errors, "invalid length specification")
+			return nil
+		}
+
+		col.Length = uint16(length)
+
+		if !p.expectPeek(RPAREN) {
+			return nil
+		}
+	}
+
+	if p.peekTokenIs(NOT) {
+		p.nextToken()
+		if !p.expectPeek(NULL) {
+			return nil
+		}
+		col.IsNullable = false
+	} else if p.peekTokenIs(NULL) {
+		p.nextToken()
+		col.IsNullable = true
+	}
+
+	if p.peekTokenIs(PRIMARY) {
+		p.nextToken()
+		if !p.expectPeek(KEY) {
+			return nil
+		}
+		col.IsPrimaryKey = true
+	}
+
+	return col
 }
 
 func (p *Parser) parseExecStatement() *ExecStatement {
@@ -448,119 +543,6 @@ func (p *Parser) parseExecStatement() *ExecStatement {
 	return stmt
 }
 
-func (p *Parser) parseColumnDefinitions() []database.Column {
-	columns := []database.Column{}
-
-	if !p.expectPeek(IDENT) && !p.expectPeek(VARIABLE) {
-		return nil
-	}
-
-	for {
-		col := database.Column{
-			Name:         p.curToken.Literal,
-			IsNullable:   true, // Default to nullable
-			IsPrimaryKey: false,
-		}
-
-		if !p.expectPeek(INTTYPE) && !p.expectPeek(FLOATTYPE) &&
-			!p.expectPeek(STRINGTYPE) && !p.expectPeek(BOOLTYPE) {
-			return nil
-		}
-
-		var dataType database.ColumnType
-		var err error
-		dataType, err = convertTokenTypeToColumnType(p.curToken.Type)
-		if err != nil {
-			p.errors = append(p.errors, err.Error())
-			return nil
-		}
-
-		col.DataType = dataType
-
-		if p.peekTokenIs(LPAREN) {
-			p.nextToken()
-			p.nextToken()
-
-			if p.curToken.Type != INT {
-				p.errors = append(p.errors, "expected integer for length specification")
-				return nil
-			}
-
-			length, err := strconv.Atoi(p.curToken.Literal)
-			if err != nil {
-				p.errors = append(p.errors, "invalid length specification")
-				return nil
-			}
-
-			col.Length = uint16(length)
-
-			if !p.expectPeek(RPAREN) {
-				return nil
-			}
-		}
-
-		if p.peekTokenIs(NOT) {
-			p.nextToken()
-			if !p.expectPeek(NULL) {
-				return nil
-			}
-			col.IsNullable = false
-		} else if p.peekTokenIs(NULL) {
-			p.nextToken()
-			col.IsNullable = true
-		}
-
-		if p.peekTokenIs(PRIMARY) {
-			p.nextToken()
-			if !p.expectPeek(KEY) {
-				return nil
-			}
-			col.IsPrimaryKey = true
-		}
-
-		columns = append(columns, col)
-
-		if !p.peekTokenIs(COMMA) {
-			break
-		}
-
-		p.nextToken()
-		if !p.expectPeek(IDENT) {
-			return nil
-		}
-	}
-
-	return columns
-}
-
-func (p *Parser) parseParameterDefinitions() []database.Column {
-	parameters := []database.Column{}
-
-	if !p.expectPeek(IDENT) && !p.expectPeek(VARIABLE) {
-		return nil
-	}
-
-	for {
-		col := database.Column{
-			Name:         p.curToken.Literal,
-			IsNullable:   true, // Default to nullable
-			IsPrimaryKey: false,
-		}
-
-		if !p.expectPeek(IDENT) && !p.expectPeek(VARIABLE) {
-			return nil
-		}
-
-		parameters = append(parameters, col)
-
-		if !p.peekTokenIs(COMMA) {
-			break
-		}
-	}
-
-	return parameters
-}
-
 func (p *Parser) parseIdentifierList() []string {
 	identifiers := []string{p.curToken.Literal}
 
@@ -574,44 +556,39 @@ func (p *Parser) parseIdentifierList() []string {
 }
 
 func (p *Parser) parseExpression() Expression {
-	if p.peekTokenIs(ASSIGN) {
+	switch {
+	case p.peekTokenIs(ASSIGN):
 		return p.parseAssignment()
-	}
-
-	if p.curToken.Type == VARIABLE {
+	case p.curToken.Type == VARIABLE:
 		return p.parseVariable()
-	}
-
-	if p.curToken.Type == STRING {
+	case p.curToken.Type == STRING:
 		return p.parseStringLiteral()
-	}
-
-	if p.curToken.Type == INT {
+	case p.curToken.Type == INT:
 		return p.parseIntLiteral()
-	}
-
-	if p.curToken.Type == FLOAT {
+	case p.curToken.Type == FLOAT:
 		return p.parseFloatLiteral()
-	}
-
-	if p.curToken.Type == BOOL {
+	case p.curToken.Type == BOOL:
 		return p.parseBooleanLiteral()
-	}
-
-	if p.curToken.Type == IDENT {
+	case p.curToken.Type == IDENT:
 		return p.parseIdentifier()
+	default:
+		return nil
 	}
-
-	return nil
 }
 
-func (p *Parser) parseIdentifier() Expression {
-	return &Identifier{Value: p.curToken.Literal}
-}
-
-func (p *Parser) parseVariable() Expression {
-	name := p.curToken.Literal[1:]
-	return &VariableExpression{Name: name}
+func (p *Parser) parseLiteral() Expression {
+	switch p.curToken.Type {
+	case STRING:
+		return p.parseStringLiteral()
+	case INT:
+		return p.parseIntLiteral()
+	case FLOAT:
+		return p.parseFloatLiteral()
+	case BOOL:
+		return p.parseBooleanLiteral()
+	default:
+		return nil
+	}
 }
 
 func (p *Parser) parseStringLiteral() Expression {
@@ -640,6 +617,15 @@ func (p *Parser) parseBooleanLiteral() Expression {
 		return nil
 	}
 	return &BooleanLiteral{Value: value}
+}
+
+func (p *Parser) parseIdentifier() Expression {
+	return &Identifier{Value: p.curToken.Literal}
+}
+
+func (p *Parser) parseVariable() Expression {
+	name := p.curToken.Literal[1:]
+	return &VariableExpression{Name: name}
 }
 
 func (p *Parser) parseAssignment() Expression {
@@ -721,10 +707,9 @@ func (p *Parser) expectPeek(t TokenType) bool {
 	if p.peekTokenIs(t) {
 		p.nextToken()
 		return true
-	} else {
-		p.peekError(t)
-		return false
 	}
+	p.peekError(t)
+	return false
 }
 
 func (p *Parser) peekTokenIs(t TokenType) bool {

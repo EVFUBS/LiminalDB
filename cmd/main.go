@@ -1,13 +1,23 @@
 package main
 
 import (
-	"LiminalDb/internal/sqlparser"
+	"LiminalDb/internal/interpreter"
+	"LiminalDb/internal/logger"
 	"fmt"
+	"os"
+	"path/filepath"
 )
 
 func main() {
-	sqlparser.Repl()
-	//test()
+	logDir := filepath.Join("logs")
+	if err := logger.Init(logger.INFO, logDir); err != nil {
+		fmt.Printf("Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+
+	logger.Info("Starting LiminalDB server")
+	interpreter.Repl()
+	logger.Info("Shutting down LiminalDB server")
 }
 
 func test() {
@@ -16,12 +26,12 @@ func test() {
 	//sql := "create table users (id int primary key, name string(100))"
 	//sql := "INSERT INTO users (id, name) VALUES (1, 'John Doe')"
 
-	lexer := sqlparser.NewLexer(sql)
-	parser := sqlparser.NewParser(lexer)
-	evaluator := sqlparser.NewEvaluator(parser)
-
+	lexer := interpreter.NewLexer(sql)
+	parser := interpreter.NewParser(lexer)
+	evaluator := interpreter.NewEvaluator(parser)
 	result, err := evaluator.Execute(sql)
 	if err != nil {
+		logger.Error("Test execution failed: %v", err)
 		panic(err)
 	}
 

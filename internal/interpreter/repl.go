@@ -1,7 +1,8 @@
-package sqlparser
+package interpreter
 
 import (
 	"LiminalDb/internal/database"
+	"LiminalDb/internal/logger"
 	"bufio"
 	"fmt"
 	"os"
@@ -64,6 +65,7 @@ func writeDataRow(sb *strings.Builder, row []interface{}, colWidths []int) {
 
 // Main REPL function
 func Repl() {
+	logger.Info("Starting REPL session")
 	fmt.Println("Welcome to LiminalDB")
 	fmt.Println("Enter SQL commands, or type 'exit' to quit")
 
@@ -72,12 +74,14 @@ func Repl() {
 	for {
 		fmt.Print("> ")
 		if !scanner.Scan() {
+			logger.Error("Error reading input: %v", scanner.Err())
 			break
 		}
 
 		input := scanner.Text()
 
 		if strings.ToLower(input) == "exit" {
+			logger.Info("User requested exit")
 			break
 		}
 
@@ -85,23 +89,30 @@ func Repl() {
 			continue
 		}
 
+		logger.Debug("Processing command: %s", input)
+
 		lexer := NewLexer(input)
 		parser := NewParser(lexer)
 		evaluator := NewEvaluator(parser)
 
 		result, err := evaluator.Execute(input)
 		if err != nil {
+			logger.Error("Command execution failed: %v", err)
 			fmt.Printf("Error: %v\n", err)
 			continue
 		}
 
+		logger.Debug("Command executed successfully")
 		formattedResult := formatResult(result)
 		fmt.Println(formattedResult)
 	}
 
 	if err := scanner.Err(); err != nil {
+		logger.Error("Error reading input: %v", err)
 		fmt.Printf("Error reading input: %v\n", err)
 	}
+
+	logger.Info("REPL session ended")
 }
 
 // Result formatting functions

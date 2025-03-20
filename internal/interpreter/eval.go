@@ -1,7 +1,8 @@
-package sqlparser
+package interpreter
 
 import (
 	"LiminalDb/internal/database"
+	"LiminalDb/internal/logger"
 	"LiminalDb/internal/storedproc"
 	"fmt"
 	"strings"
@@ -20,24 +21,31 @@ func NewEvaluator(parser *Parser) *Evaluator {
 }
 
 func (e *Evaluator) Execute(query string) (interface{}, error) {
+	logger.Debug("Executing query: %s", query)
+
 	e.parser.lexer = NewLexer(query)
 	e.parser.nextToken()
 	e.parser.nextToken()
 
 	stmt := e.parser.ParseStatement()
 	if stmt == nil {
+		logger.Error("Failed to parse query: %s", query)
 		return nil, fmt.Errorf("failed to parse query: %s", query)
 	}
 
 	result, err := e.executeStatement(stmt)
 	if err != nil {
+		logger.Error("Failed to execute statement: %v", err)
 		return nil, err
 	}
 
+	logger.Debug("Query executed successfully")
 	return result, nil
 }
 
 func (e *Evaluator) executeStatement(stmt Statement) (interface{}, error) {
+	logger.Debug("Executing statement of type: %T", stmt)
+
 	switch stmt := stmt.(type) {
 	case *SelectStatement:
 		return e.executeSelect(stmt)
@@ -58,59 +66,92 @@ func (e *Evaluator) executeStatement(stmt Statement) (interface{}, error) {
 	case *ExecStatement:
 		return e.executeStoredProcedure(stmt)
 	default:
+		logger.Error("Unsupported statement type: %T", stmt)
 		return nil, fmt.Errorf("unsupported statement type")
 	}
 }
 
 func (e *Evaluator) executeSelect(stmt *SelectStatement) (*database.QueryResult, error) {
+	logger.Debug("Executing SELECT statement on table: %s", stmt.TableName)
+
 	data, err := e.selectData(stmt.TableName, stmt.Fields, stmt.Where)
 	if err != nil {
+		logger.Error("Failed to execute SELECT statement: %v", err)
 		return nil, err
 	}
+
+	logger.Debug("SELECT statement executed successfully")
 	return data, nil
 }
 
 func (e *Evaluator) executeInsert(stmt *InsertStatement) (interface{}, error) {
+	logger.Debug("Executing INSERT statement on table: %s", stmt.TableName)
+
 	data, err := e.insertData(stmt.TableName, stmt.Columns, stmt.ValueLists)
 	if err != nil {
+		logger.Error("Failed to execute INSERT statement: %v", err)
 		return nil, err
 	}
+
+	logger.Debug("INSERT statement executed successfully")
 	return data, nil
 }
 
 func (e *Evaluator) executeCreateTable(stmt *CreateTableStatement) (interface{}, error) {
+	logger.Debug("Executing CREATE TABLE statement for table: %s", stmt.TableName)
+
 	data, err := e.createTable(stmt.TableName, stmt.Columns)
 	if err != nil {
+		logger.Error("Failed to execute CREATE TABLE statement: %v", err)
 		return nil, err
 	}
+
+	logger.Debug("CREATE TABLE statement executed successfully")
 	return data, nil
 }
 
 func (e *Evaluator) executeDelete(stmt *DeleteStatement) (interface{}, error) {
+	logger.Debug("Executing DELETE statement on table: %s", stmt.TableName)
+
 	data, err := e.deleteData(stmt.TableName, stmt.Where)
 	if err != nil {
+		logger.Error("Failed to execute DELETE statement: %v", err)
 		return nil, err
 	}
+
+	logger.Debug("DELETE statement executed successfully")
 	return data, nil
 }
 
 func (e *Evaluator) executeDropTable(stmt *DropTableStatement) (interface{}, error) {
+	logger.Debug("Executing DROP TABLE statement for table: %s", stmt.TableName)
+
 	data, err := e.dropTable(stmt.TableName)
 	if err != nil {
+		logger.Error("Failed to execute DROP TABLE statement: %v", err)
 		return nil, err
 	}
+
+	logger.Debug("DROP TABLE statement executed successfully")
 	return data, nil
 }
 
 func (e *Evaluator) executeDescribeTable(stmt *DescribeTableStatement) (interface{}, error) {
+	logger.Debug("Executing DESCRIBE TABLE statement for table: %s", stmt.TableName)
+
 	data, err := e.describeTable(stmt.TableName)
 	if err != nil {
+		logger.Error("Failed to execute DESCRIBE TABLE statement: %v", err)
 		return nil, err
 	}
+
+	logger.Debug("DESCRIBE TABLE statement executed successfully")
 	return data, nil
 }
 
 func (e *Evaluator) executeCreateProcedure(stmt *CreateProcedureStatement) (interface{}, error) {
+	logger.Debug("Executing CREATE PROCEDURE statement for procedure: %s", stmt.Name)
+
 	proc := storedproc.NewStoredProc(
 		stmt.Name,
 		stmt.Body,
@@ -120,13 +161,17 @@ func (e *Evaluator) executeCreateProcedure(stmt *CreateProcedureStatement) (inte
 
 	err := proc.WriteToFile(stmt.Name)
 	if err != nil {
+		logger.Error("Failed to create stored procedure: %v", err)
 		return nil, fmt.Errorf("failed to create stored procedure: %w", err)
 	}
 
+	logger.Debug("CREATE PROCEDURE statement executed successfully")
 	return "Stored procedure created successfully", nil
 }
 
 func (e *Evaluator) executeAlterProcedure(stmt *AlterProcedureStatement) (interface{}, error) {
+	logger.Debug("Executing ALTER PROCEDURE statement for procedure: %s", stmt.Name)
+
 	proc := storedproc.NewStoredProc(
 		stmt.Name,
 		stmt.Body,
@@ -136,9 +181,11 @@ func (e *Evaluator) executeAlterProcedure(stmt *AlterProcedureStatement) (interf
 
 	err := proc.WriteToFile(stmt.Name)
 	if err != nil {
+		logger.Error("Failed to alter stored procedure: %v", err)
 		return nil, fmt.Errorf("failed to alter stored procedure: %w", err)
 	}
 
+	logger.Debug("ALTER PROCEDURE statement executed successfully")
 	return "Stored procedure altered successfully", nil
 }
 
@@ -172,14 +219,34 @@ func (e *Evaluator) executeStoredProcedure(stmt *ExecStatement) (interface{}, er
 		processedBody = strings.Replace(processedBody, name, valueStr, -1)
 	}
 
-	proc.Body = processedBody
-	result, err := e.Execute(proc.Body)
+	// Split the body into individual statements
+	statements := strings.Split(processedBody, ";")
+	var lastResult interface{}
+	var lastErr error
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute stored procedure: %w", err)
+	// Execute each statement
+	for _, statement := range statements {
+		statement = strings.TrimSpace(statement)
+		if statement == "" {
+			continue
+		}
+
+		e.parser.lexer = NewLexer(statement)
+		e.parser.nextToken()
+		e.parser.nextToken()
+
+		stmt := e.parser.ParseStatement()
+		if stmt == nil {
+			return nil, fmt.Errorf("failed to parse statement in stored procedure: %s", statement)
+		}
+
+		lastResult, lastErr = e.executeStatement(stmt)
+		if lastErr != nil {
+			return nil, fmt.Errorf("failed to execute statement in stored procedure: %w", lastErr)
+		}
 	}
 
-	return result, nil
+	return lastResult, nil
 }
 
 func (e *Evaluator) Evaluate(expr Expression, row []interface{}, columns []database.Column) (interface{}, error) {
