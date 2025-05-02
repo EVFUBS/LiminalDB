@@ -159,7 +159,7 @@ func (p *Parser) nextToken() {
 	p.peekToken = p.lexer.NextToken()
 }
 
-func (p *Parser) ParseStatement() Statement {
+func (p *Parser) ParseStatement() (Statement, error) {
 	switch p.curToken.Type {
 	case SELECT:
 		return p.parseSelectStatement()
@@ -179,27 +179,27 @@ func (p *Parser) ParseStatement() Statement {
 		return p.parseExecStatement()
 	default:
 		p.peekError(p.curToken.Type)
-		return nil
+		return nil, fmt.Errorf("expected statement, got %s", p.curToken.Literal)
 	}
 }
 
-func (p *Parser) parseSelectStatement() *SelectStatement {
+func (p *Parser) parseSelectStatement() (*SelectStatement, error) {
 	stmt := &SelectStatement{}
 
 	if !p.expectPeek(IDENT) {
 		if !p.expectPeek(ALL) {
-			return nil
+			return nil, fmt.Errorf("expected identifier or all, got %s", p.curToken.Literal)
 		}
 	}
 
 	stmt.Fields = p.parseIdentifierList()
 
 	if !p.expectPeek(FROM) {
-		return nil
+		return nil, fmt.Errorf("expected from, got %s", p.curToken.Literal)
 	}
 
 	if !p.expectPeek(IDENT) {
-		return nil
+		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
 	}
 
 	stmt.TableName = p.curToken.Literal
@@ -210,46 +210,50 @@ func (p *Parser) parseSelectStatement() *SelectStatement {
 		stmt.Where = p.parseExpression()
 	}
 
-	return stmt
+	if !p.expectPeek(SEMICOLON) && !p.expectPeek(EOF) {
+		return nil, fmt.Errorf("expected semicolon or eof, got %s", p.curToken.Literal)
+	}
+
+	return stmt, nil
 }
 
-func (p *Parser) parseInsertStatement() *InsertStatement {
+func (p *Parser) parseInsertStatement() (*InsertStatement, error) {
 	stmt := &InsertStatement{}
 
 	if !p.expectPeek(INTO) {
-		return nil
+		return nil, fmt.Errorf("expected into, got %s", p.curToken.Literal)
 	}
 
 	if !p.expectPeek(IDENT) {
-		return nil
+		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
 	}
 
 	stmt.TableName = p.curToken.Literal
 
 	if !p.expectPeek(LPAREN) {
-		return nil
+		return nil, fmt.Errorf("expected left parenthesis, got %s", p.curToken.Literal)
 	}
 
 	p.nextToken()
 	stmt.Columns = p.parseIdentifierList()
 
 	if !p.expectPeek(RPAREN) {
-		return nil
+		return nil, fmt.Errorf("expected right parenthesis, got %s", p.curToken.Literal)
 	}
 
 	if !p.expectPeek(VALUES) {
-		return nil
+		return nil, fmt.Errorf("expected values, got %s", p.curToken.Literal)
 	}
 
 	p.nextToken()
 	stmt.ValueLists = p.parseValueLists()
 
-	return stmt
+	return stmt, nil
 }
 
-func (p *Parser) parseCreateStatement() Statement {
+func (p *Parser) parseCreateStatement() (Statement, error) {
 	if !p.expectPeek(TABLE) && !p.expectPeek(PROCEDURE) {
-		return nil
+		return nil, fmt.Errorf("expected table or procedure, got %s", p.curToken.Literal)
 	}
 
 	switch strings.ToUpper(p.curToken.Literal) {
@@ -259,40 +263,40 @@ func (p *Parser) parseCreateStatement() Statement {
 		return p.parseCreateProcedureStatement()
 	default:
 		p.peekError(p.curToken.Type)
-		return nil
+		return nil, fmt.Errorf("expected table or procedure, got %s", p.curToken.Literal)
 	}
 }
 
-func (p *Parser) parseCreateTableStatement() *CreateTableStatement {
+func (p *Parser) parseCreateTableStatement() (*CreateTableStatement, error) {
 	stmt := &CreateTableStatement{}
 
 	if !p.expectPeek(IDENT) {
-		return nil
+		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
 	}
 	stmt.TableName = p.curToken.Literal
 
 	if !p.expectPeek(LPAREN) {
-		return nil
+		return nil, fmt.Errorf("expected left parenthesis, got %s", p.curToken.Literal)
 	}
 
 	stmt.Columns = p.parseColumnDefinitions()
 
 	if !p.expectPeek(RPAREN) {
-		return nil
+		return nil, fmt.Errorf("expected right parenthesis, got %s", p.curToken.Literal)
 	}
 
-	return stmt
+	return stmt, nil
 }
 
-func (p *Parser) parseDeleteStatement() *DeleteStatement {
+func (p *Parser) parseDeleteStatement() (*DeleteStatement, error) {
 	stmt := &DeleteStatement{}
 
 	if !p.expectPeek(FROM) {
-		return nil
+		return nil, fmt.Errorf("expected from, got %s", p.curToken.Literal)
 	}
 
 	if !p.expectPeek(IDENT) {
-		return nil
+		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
 	}
 
 	stmt.TableName = p.curToken.Literal
@@ -303,53 +307,53 @@ func (p *Parser) parseDeleteStatement() *DeleteStatement {
 		stmt.Where = p.parseExpression()
 	}
 
-	return stmt
+	return stmt, nil
 }
 
-func (p *Parser) parseDropTableStatement() *DropTableStatement {
+func (p *Parser) parseDropTableStatement() (*DropTableStatement, error) {
 	stmt := &DropTableStatement{}
 
 	if !p.expectPeek(TABLE) {
-		return nil
+		return nil, fmt.Errorf("expected table, got %s", p.curToken.Literal)
 	}
 
 	if !p.expectPeek(IDENT) {
-		return nil
+		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
 	}
 
 	stmt.TableName = p.curToken.Literal
 
-	return stmt
+	return stmt, nil
 }
 
-func (p *Parser) parseDescribeTableStatement() *DescribeTableStatement {
+func (p *Parser) parseDescribeTableStatement() (*DescribeTableStatement, error) {
 	stmt := &DescribeTableStatement{}
 
 	if !p.expectPeek(TABLE) {
-		return nil
+		return nil, fmt.Errorf("expected table, got %s", p.curToken.Literal)
 	}
 
 	if !p.expectPeek(IDENT) {
-		return nil
+		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
 	}
 
 	stmt.TableName = p.curToken.Literal
 
-	return stmt
+	return stmt, nil
 }
 
-func (p *Parser) parseAlterStatement() Statement {
+func (p *Parser) parseAlterStatement() (Statement, error) {
 	if !p.expectPeek(PROCEDURE) {
-		return nil
+		return nil, fmt.Errorf("expected procedure, got %s", p.curToken.Literal)
 	}
 	return p.parseAlterProcedureStatement()
 }
 
-func (p *Parser) parseCreateProcedureStatement() *CreateProcedureStatement {
+func (p *Parser) parseCreateProcedureStatement() (*CreateProcedureStatement, error) {
 	stmt := &CreateProcedureStatement{}
 
 	if !p.expectPeek(IDENT) {
-		return nil
+		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
 	}
 	stmt.Name = p.curToken.Literal
 
@@ -357,24 +361,24 @@ func (p *Parser) parseCreateProcedureStatement() *CreateProcedureStatement {
 		p.nextToken()
 		stmt.Parameters = p.parseColumnDefinitions()
 		if !p.expectPeek(RPAREN) {
-			return nil
+			return nil, fmt.Errorf("expected right parenthesis, got %s", p.curToken.Literal)
 		}
 	}
 
-	body, ok := p.parseProcedureBody()
-	if !ok {
-		return nil
+	body, ok, err := p.parseProcedureBody()
+	if !ok || err != nil {
+		return nil, err
 	}
 	stmt.Body = body
 
-	return stmt
+	return stmt, nil
 }
 
-func (p *Parser) parseAlterProcedureStatement() *AlterProcedureStatement {
+func (p *Parser) parseAlterProcedureStatement() (*AlterProcedureStatement, error) {
 	stmt := &AlterProcedureStatement{}
 
 	if !p.expectPeek(IDENT) {
-		return nil
+		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
 	}
 	stmt.Name = p.curToken.Literal
 
@@ -383,25 +387,25 @@ func (p *Parser) parseAlterProcedureStatement() *AlterProcedureStatement {
 		p.nextToken()
 		stmt.Parameters = p.parseColumnDefinitions()
 		if !p.expectPeek(RPAREN) {
-			return nil
+			return nil, fmt.Errorf("expected right parenthesis, got %s", p.curToken.Literal)
 		}
 	}
 
-	body, ok := p.parseProcedureBody()
-	if !ok {
-		return nil
+	body, ok, err := p.parseProcedureBody()
+	if !ok || err != nil {
+		return nil, err
 	}
 	stmt.Body = body
 
-	return stmt
+	return stmt, nil
 }
 
-func (p *Parser) parseProcedureBody() (string, bool) {
+func (p *Parser) parseProcedureBody() (string, bool, error) {
 	if !p.expectPeek(AS) {
-		return "", false
+		return "", false, fmt.Errorf("expected as, got %s", p.curToken.Literal)
 	}
 	if !p.expectPeek(BEGIN) {
-		return "", false
+		return "", false, fmt.Errorf("expected begin, got %s", p.curToken.Literal)
 	}
 
 	var bodyBuilder strings.Builder
@@ -411,12 +415,12 @@ func (p *Parser) parseProcedureBody() (string, bool) {
 			break
 		}
 		if p.curToken.Type == EOF {
-			return "", false
+			return "", false, fmt.Errorf("expected end, got %s", p.curToken.Literal)
 		}
 
-		stmt := p.ParseStatement()
+		stmt, err := p.ParseStatement()
 		if stmt == nil {
-			return "", false
+			return "", false, err
 		}
 
 		bodyBuilder.WriteString(p.curToken.Literal)
@@ -428,7 +432,7 @@ func (p *Parser) parseProcedureBody() (string, bool) {
 		}
 	}
 
-	return bodyBuilder.String(), true
+	return bodyBuilder.String(), true, nil
 }
 
 func (p *Parser) parseColumnDefinitions() []database.Column {
@@ -524,11 +528,11 @@ func (p *Parser) parseColumnDefinition() *database.Column {
 	return col
 }
 
-func (p *Parser) parseExecStatement() *ExecStatement {
+func (p *Parser) parseExecStatement() (*ExecStatement, error) {
 	stmt := &ExecStatement{}
 
 	if !p.expectPeek(IDENT) {
-		return nil
+		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
 	}
 	stmt.Name = p.curToken.Literal
 
@@ -536,11 +540,11 @@ func (p *Parser) parseExecStatement() *ExecStatement {
 	if p.peekTokenIs(LPAREN) {
 		stmt.Parameters = p.parseValueList()
 		if !p.curTokenIs(RPAREN) {
-			return nil
+			return nil, fmt.Errorf("expected right parenthesis, got %s", p.curToken.Literal)
 		}
 	}
 
-	return stmt
+	return stmt, nil
 }
 
 func (p *Parser) parseIdentifierList() []string {
@@ -557,7 +561,7 @@ func (p *Parser) parseIdentifierList() []string {
 
 func (p *Parser) parseExpression() Expression {
 	switch {
-	case p.peekTokenIs(ASSIGN):
+	case p.peekTokenIs(ASSIGN) || p.peekTokenIs(LESS_THAN) || p.peekTokenIs(LESS_THAN_OR_EQ) || p.peekTokenIs(GREATER_THAN) || p.peekTokenIs(GREATER_THAN_OR_EQ):
 		return p.parseAssignment()
 	case p.curToken.Type == VARIABLE:
 		return p.parseVariable()
@@ -633,7 +637,7 @@ func (p *Parser) parseAssignment() Expression {
 		Left: p.parseIdentifier(),
 	}
 
-	if !p.expectPeek(ASSIGN) {
+	if !p.expectPeek(ASSIGN) && !p.expectPeek(LESS_THAN) && !p.expectPeek(LESS_THAN_OR_EQ) && !p.expectPeek(GREATER_THAN) && !p.expectPeek(GREATER_THAN_OR_EQ) {
 		return nil
 	}
 

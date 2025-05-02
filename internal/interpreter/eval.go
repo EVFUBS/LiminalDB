@@ -27,9 +27,9 @@ func (e *Evaluator) Execute(query string) (interface{}, error) {
 	e.parser.nextToken()
 	e.parser.nextToken()
 
-	stmt := e.parser.ParseStatement()
-	if stmt == nil {
-		logger.Error("Failed to parse query: %s", query)
+	stmt, err := e.parser.ParseStatement()
+	if err != nil || stmt == nil {
+		logger.Error("Failed to parse query: %s with error: %s", query, err)
 		return nil, fmt.Errorf("failed to parse query: %s", query)
 	}
 
@@ -235,8 +235,8 @@ func (e *Evaluator) executeStoredProcedure(stmt *ExecStatement) (interface{}, er
 		e.parser.nextToken()
 		e.parser.nextToken()
 
-		stmt := e.parser.ParseStatement()
-		if stmt == nil {
+		stmt, err := e.parser.ParseStatement()
+		if err != nil || stmt == nil {
 			return nil, fmt.Errorf("failed to parse statement in stored procedure: %s", statement)
 		}
 
@@ -280,15 +280,30 @@ func (e *Evaluator) Evaluate(expr Expression, row []interface{}, columns []datab
 			return left == right, nil
 		case "!=":
 			return left != right, nil
-		// TODO: THIS IS A HUGE PROBLEM FIX AS IT COULD BE FLOATS AS WELL FOR EXAMPLE
 		case ">":
-			return left.(int) > right.(int), nil
+			shouldReturn, result, err := greaterThanComparison(left, right)
+			if shouldReturn {
+				return result, err
+			}
+			return false, nil
 		case ">=":
-			return left.(int) >= right.(int), nil
+			shouldReturn, result, err := greaterThanOrEqualComparison(left, right)
+			if shouldReturn {
+				return result, err
+			}
+			return false, nil
 		case "<":
-			return left.(int) < right.(int), nil
+			shouldReturn, result, err := lessThanComparison(left, right)
+			if shouldReturn {
+				return result, err
+			}
+			return false, nil
 		case "<=":
-			return left.(int) <= right.(int), nil
+			shouldReturn, result, err := lessThanOrEqualComparison(left, right)
+			if shouldReturn {
+				return result, err
+			}
+			return false, nil
 		default:
 			return nil, fmt.Errorf("unsupported operator: %s", expr.Op)
 		}
@@ -316,7 +331,7 @@ func (e *Evaluator) insertData(tableName string, fields []string, values [][]Exp
 	data := [][]interface{}{}
 	for _, value := range values {
 		row := make([]interface{}, len(fields))
-		for i, _ := range fields {
+		for i := range fields {
 			if i < len(value) {
 				row[i] = value[i].GetValue()
 			} else {

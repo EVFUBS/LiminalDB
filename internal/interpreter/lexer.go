@@ -30,6 +30,12 @@ func (l *Lexer) NextToken() Token {
 
 	l.skipWhitespace()
 
+	if l.ch == 0 {
+		tok.Type = EOF
+		tok.Literal = ""
+		return tok
+	}
+
 	switch l.ch {
 	case '@':
 		l.readChar()
@@ -54,6 +60,26 @@ func (l *Lexer) NextToken() Token {
 		tok.Type = STRING
 		tok.Literal = l.readString()
 		return tok
+	case '<':
+		if l.peekChar() == '=' {
+			ch := l.ch
+			l.readChar()
+			tok.Type = LESS_THAN_OR_EQ
+			tok.Literal = string(ch) + string(l.ch)
+			l.readChar()
+			return tok
+		}
+		tok = newToken(LESS_THAN, l.ch)
+	case '>':
+		if l.peekChar() == '=' {
+			ch := l.ch
+			l.readChar()
+			tok.Type = GREATER_THAN_OR_EQ
+			tok.Literal = string(ch) + string(l.ch)
+			l.readChar()
+			return tok
+		}
+		tok = newToken(GREATER_THAN, l.ch)
 	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
 		return l.readNumberToken()
 	default:
@@ -141,6 +167,12 @@ const (
 	ASSIGN = "="
 	PLUS   = "+"
 
+	// Comparison Operators
+	LESS_THAN          = "<"
+	LESS_THAN_OR_EQ    = "<="
+	GREATER_THAN       = ">"
+	GREATER_THAN_OR_EQ = ">="
+
 	// Delimiters
 	COMMA     = ","
 	SEMICOLON = ";"
@@ -212,6 +244,10 @@ var keywords = map[string]TokenType{
 	"end":        END,
 	"exec":       EXEC,
 	"variable":   VARIABLE,
+	"<":          LESS_THAN,
+	"<=":         LESS_THAN_OR_EQ,
+	">":          GREATER_THAN,
+	">=":         GREATER_THAN_OR_EQ,
 }
 
 func LookupIdent(ident string) TokenType {
@@ -264,4 +300,11 @@ func (l *Lexer) readNumberToken() Token {
 	}
 	tok.Literal = l.input[startPos:l.position]
 	return tok
+}
+
+func (l *Lexer) peekChar() byte {
+	if l.readPosition >= len(l.input) {
+		return 0
+	}
+	return l.input[l.readPosition]
 }
