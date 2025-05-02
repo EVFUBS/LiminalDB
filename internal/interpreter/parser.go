@@ -57,6 +57,22 @@ type DescribeTableStatement struct {
 	TableName string
 }
 
+type CreateIndexStatement struct {
+	IndexName string
+	TableName string
+	Columns   []string
+	IsUnique  bool
+}
+
+type DropIndexStatement struct {
+	IndexName string
+	TableName string
+}
+
+type ShowIndexesStatement struct {
+	TableName string
+}
+
 type CreateProcedureStatement struct {
 	Name        string
 	Parameters  []database.Column
@@ -170,13 +186,15 @@ func (p *Parser) ParseStatement() (Statement, error) {
 	case DELETE:
 		return p.parseDeleteStatement()
 	case DROP:
-		return p.parseDropTableStatement()
+		return p.parseDropStatement()
 	case DESC:
 		return p.parseDescribeTableStatement()
 	case ALTER:
 		return p.parseAlterStatement()
 	case EXEC:
 		return p.parseExecStatement()
+	case SHOW:
+		return p.parseShowStatement()
 	default:
 		p.peekError(p.curToken.Type)
 		return nil, fmt.Errorf("expected statement, got %s", p.curToken.Literal)
@@ -252,19 +270,61 @@ func (p *Parser) parseInsertStatement() (*InsertStatement, error) {
 }
 
 func (p *Parser) parseCreateStatement() (Statement, error) {
-	if !p.expectPeek(TABLE) && !p.expectPeek(PROCEDURE) {
-		return nil, fmt.Errorf("expected table or procedure, got %s", p.curToken.Literal)
+	if !p.expectPeek(TABLE) && !p.expectPeek(PROCEDURE) && !p.expectPeek(INDEX) && !p.expectPeek(UNIQUE) {
+		return nil, fmt.Errorf("expected table, procedure, index, or unique, got %s", p.curToken.Literal)
 	}
 
-	switch strings.ToUpper(p.curToken.Literal) {
-	case "TABLE":
+	switch p.curToken.Type {
+	case TABLE:
 		return p.parseCreateTableStatement()
-	case "PROCEDURE":
+	case PROCEDURE:
 		return p.parseCreateProcedureStatement()
+	case INDEX:
+		return p.parseCreateIndexStatement(false)
+	case UNIQUE:
+		if !p.expectPeek(INDEX) {
+			return nil, fmt.Errorf("expected INDEX after UNIQUE, got %s", p.curToken.Literal)
+		}
+		return p.parseCreateIndexStatement(true)
 	default:
 		p.peekError(p.curToken.Type)
-		return nil, fmt.Errorf("expected table or procedure, got %s", p.curToken.Literal)
+		return nil, fmt.Errorf("expected table, procedure, index, or unique, got %s", p.curToken.Literal)
 	}
+}
+
+func (p *Parser) parseCreateIndexStatement(isUnique bool) (*CreateIndexStatement, error) {
+	stmt := &CreateIndexStatement{
+		IsUnique: isUnique,
+	}
+
+	if !p.expectPeek(IDENT) {
+		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
+	}
+
+	stmt.IndexName = p.curToken.Literal
+
+	if !p.expectPeek(ON) {
+		return nil, fmt.Errorf("expected ON, got %s", p.curToken.Literal)
+	}
+
+	if !p.expectPeek(IDENT) {
+		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
+	}
+
+	stmt.TableName = p.curToken.Literal
+
+	if !p.expectPeek(LPAREN) {
+		return nil, fmt.Errorf("expected left parenthesis, got %s", p.curToken.Literal)
+	}
+
+	p.nextToken()
+	stmt.Columns = p.parseIdentifierList()
+
+	if !p.expectPeek(RPAREN) {
+		return nil, fmt.Errorf("expected right parenthesis, got %s", p.curToken.Literal)
+	}
+
+	return stmt, nil
 }
 
 func (p *Parser) parseCreateTableStatement() (*CreateTableStatement, error) {
@@ -310,11 +370,44 @@ func (p *Parser) parseDeleteStatement() (*DeleteStatement, error) {
 	return stmt, nil
 }
 
+func (p *Parser) parseDropStatement() (Statement, error) {
+	if !p.expectPeek(TABLE) && !p.expectPeek(INDEX) {
+		return nil, fmt.Errorf("expected table or index, got %s", p.curToken.Literal)
+	}
+
+	switch p.curToken.Type {
+	case TABLE:
+		return p.parseDropTableStatement()
+	case INDEX:
+		return p.parseDropIndexStatement()
+	default:
+		return nil, fmt.Errorf("expected table or index, got %s", p.curToken.Literal)
+	}
+}
+
 func (p *Parser) parseDropTableStatement() (*DropTableStatement, error) {
 	stmt := &DropTableStatement{}
 
-	if !p.expectPeek(TABLE) {
-		return nil, fmt.Errorf("expected table, got %s", p.curToken.Literal)
+	if !p.expectPeek(IDENT) {
+		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
+	}
+
+	stmt.TableName = p.curToken.Literal
+
+	return stmt, nil
+}
+
+func (p *Parser) parseDropIndexStatement() (*DropIndexStatement, error) {
+	stmt := &DropIndexStatement{}
+
+	if !p.expectPeek(IDENT) {
+		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
+	}
+
+	stmt.IndexName = p.curToken.Literal
+
+	if !p.expectPeek(ON) {
+		return nil, fmt.Errorf("expected ON, got %s", p.curToken.Literal)
 	}
 
 	if !p.expectPeek(IDENT) {
@@ -322,6 +415,26 @@ func (p *Parser) parseDropTableStatement() (*DropTableStatement, error) {
 	}
 
 	stmt.TableName = p.curToken.Literal
+
+	return stmt, nil
+}
+
+func (p *Parser) parseShowStatement() (Statement, error) {
+	if !p.expectPeek(INDEXES) {
+		return nil, fmt.Errorf("expected INDEXES, got %s", p.curToken.Literal)
+	}
+
+	if !p.expectPeek(FROM) {
+		return nil, fmt.Errorf("expected FROM, got %s", p.curToken.Literal)
+	}
+
+	if !p.expectPeek(IDENT) {
+		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
+	}
+
+	stmt := &ShowIndexesStatement{
+		TableName: p.curToken.Literal,
+	}
 
 	return stmt, nil
 }

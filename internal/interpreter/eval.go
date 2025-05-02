@@ -65,6 +65,12 @@ func (e *Evaluator) executeStatement(stmt Statement) (interface{}, error) {
 		return e.executeAlterProcedure(stmt)
 	case *ExecStatement:
 		return e.executeStoredProcedure(stmt)
+	case *CreateIndexStatement:
+		return e.executeCreateIndex(stmt)
+	case *DropIndexStatement:
+		return e.executeDropIndex(stmt)
+	case *ShowIndexesStatement:
+		return e.executeShowIndexes(stmt)
 	default:
 		logger.Error("Unsupported statement type: %T", stmt)
 		return nil, fmt.Errorf("unsupported statement type")
@@ -402,6 +408,45 @@ func (e *Evaluator) describeTable(tableName string) (interface{}, error) {
 		return nil, fmt.Errorf("failed to read metadata: %w", err)
 	}
 	return metadata, nil
+}
+
+func (e *Evaluator) executeCreateIndex(stmt *CreateIndexStatement) (interface{}, error) {
+	logger.Debug("Executing CREATE INDEX statement for index: %s on table: %s", stmt.IndexName, stmt.TableName)
+
+	err := e.operations.CreateIndex(stmt.TableName, stmt.IndexName, stmt.Columns, stmt.IsUnique)
+	if err != nil {
+		logger.Error("Failed to execute CREATE INDEX statement: %v", err)
+		return nil, fmt.Errorf("failed to create index: %w", err)
+	}
+
+	logger.Debug("CREATE INDEX statement executed successfully")
+	return "Create index successful", nil
+}
+
+func (e *Evaluator) executeDropIndex(stmt *DropIndexStatement) (interface{}, error) {
+	logger.Debug("Executing DROP INDEX statement for index: %s on table: %s", stmt.IndexName, stmt.TableName)
+
+	err := e.operations.DropIndex(stmt.TableName, stmt.IndexName)
+	if err != nil {
+		logger.Error("Failed to execute DROP INDEX statement: %v", err)
+		return nil, fmt.Errorf("failed to drop index: %w", err)
+	}
+
+	logger.Debug("DROP INDEX statement executed successfully")
+	return "Drop index successful", nil
+}
+
+func (e *Evaluator) executeShowIndexes(stmt *ShowIndexesStatement) (interface{}, error) {
+	logger.Debug("Executing SHOW INDEXES statement for table: %s", stmt.TableName)
+
+	indexes, err := e.operations.ListIndexes(stmt.TableName)
+	if err != nil {
+		logger.Error("Failed to execute SHOW INDEXES statement: %v", err)
+		return nil, fmt.Errorf("failed to list indexes: %w", err)
+	}
+
+	logger.Debug("SHOW INDEXES statement executed successfully")
+	return indexes, nil
 }
 
 func convertTokenTypeToColumnType(tokenType TokenType) (database.ColumnType, error) {

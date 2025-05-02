@@ -131,6 +131,54 @@ func (b BinarySerializer) SerializeMetadata(metadata TableMetadata) ([]byte, uin
 		return nil, 0, err
 	}
 
+	// Serialize foreign keys (placeholder for future implementation)
+	if err := binary.Write(buf, binary.LittleEndian, int64(len(metadata.ForeignKeys))); err != nil {
+		return nil, 0, err
+	}
+	// We're not actually serializing foreign keys yet, just writing the count
+
+	// Serialize indexes
+	indexCount := int64(0)
+	if metadata.Indexes != nil {
+		indexCount = int64(len(metadata.Indexes))
+	}
+	if err := binary.Write(buf, binary.LittleEndian, indexCount); err != nil {
+		return nil, 0, err
+	}
+
+	for _, idx := range metadata.Indexes {
+		// Write index name
+		idxNameBytes := []byte(idx.Name)
+		if err := binary.Write(buf, binary.LittleEndian, uint16(len(idxNameBytes))); err != nil {
+			return nil, 0, err
+		}
+		if err := binary.Write(buf, binary.LittleEndian, idxNameBytes); err != nil {
+			return nil, 0, err
+		}
+
+		// Write columns count and names
+		if err := binary.Write(buf, binary.LittleEndian, int64(len(idx.Columns))); err != nil {
+			return nil, 0, err
+		}
+		for _, col := range idx.Columns {
+			colBytes := []byte(col)
+			if err := binary.Write(buf, binary.LittleEndian, uint16(len(colBytes))); err != nil {
+				return nil, 0, err
+			}
+			if err := binary.Write(buf, binary.LittleEndian, colBytes); err != nil {
+				return nil, 0, err
+			}
+		}
+
+		// Write flags
+		if err := binary.Write(buf, binary.LittleEndian, idx.IsUnique); err != nil {
+			return nil, 0, err
+		}
+		if err := binary.Write(buf, binary.LittleEndian, idx.IsPrimary); err != nil {
+			return nil, 0, err
+		}
+	}
+
 	return buf.Bytes(), uint32(buf.Len()), nil
 }
 
@@ -187,6 +235,66 @@ func (b BinarySerializer) DeserializeMetadata(buf *bytes.Reader) (TableMetadata,
 	}
 	if err := binary.Read(buf, binary.LittleEndian, &metadata.DataOffset); err != nil {
 		return TableMetadata{}, err
+	}
+
+	// Deserialize foreign keys (placeholder for future implementation)
+	var foreignKeyCount int64
+	if err := binary.Read(buf, binary.LittleEndian, &foreignKeyCount); err != nil {
+		// If we can't read foreign key count, it might be an old file format
+		// Just return what we have so far
+		return metadata, nil
+	}
+	// We're not actually deserializing foreign keys yet, just reading the count
+
+	// Deserialize indexes
+	var indexCount int64
+	if err := binary.Read(buf, binary.LittleEndian, &indexCount); err != nil {
+		// If we can't read index count, it might be an old file format
+		// Just return what we have so far
+		return metadata, nil
+	}
+
+	metadata.Indexes = make([]IndexMetadata, indexCount)
+	for i := range metadata.Indexes {
+		// Read index name
+		var idxNameLength uint16
+		if err := binary.Read(buf, binary.LittleEndian, &idxNameLength); err != nil {
+			return TableMetadata{}, err
+		}
+
+		idxNameBytes := make([]byte, idxNameLength)
+		if _, err := buf.Read(idxNameBytes); err != nil {
+			return TableMetadata{}, err
+		}
+		metadata.Indexes[i].Name = string(idxNameBytes)
+
+		// Read columns count and names
+		var columnCount int64
+		if err := binary.Read(buf, binary.LittleEndian, &columnCount); err != nil {
+			return TableMetadata{}, err
+		}
+
+		metadata.Indexes[i].Columns = make([]string, columnCount)
+		for j := range metadata.Indexes[i].Columns {
+			var colLength uint16
+			if err := binary.Read(buf, binary.LittleEndian, &colLength); err != nil {
+				return TableMetadata{}, err
+			}
+
+			colBytes := make([]byte, colLength)
+			if _, err := buf.Read(colBytes); err != nil {
+				return TableMetadata{}, err
+			}
+			metadata.Indexes[i].Columns[j] = string(colBytes)
+		}
+
+		// Read flags
+		if err := binary.Read(buf, binary.LittleEndian, &metadata.Indexes[i].IsUnique); err != nil {
+			return TableMetadata{}, err
+		}
+		if err := binary.Read(buf, binary.LittleEndian, &metadata.Indexes[i].IsPrimary); err != nil {
+			return TableMetadata{}, err
+		}
 	}
 
 	return metadata, nil

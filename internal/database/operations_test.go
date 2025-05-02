@@ -1,6 +1,7 @@
 package database
 
 import (
+	"LiminalDb/internal/logger"
 	"os"
 	"testing"
 	"time"
@@ -11,18 +12,30 @@ func setupTestEnvironment(t *testing.T) {
 	if err := os.RemoveAll(DatabaseDir); err != nil {
 		t.Fatalf("Failed to clean up test environment: %v", err)
 	}
+
+	// Initialize logger
+	logDir := "logs"
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		t.Fatalf("Failed to create log directory: %v", err)
+	}
+
+	// Initialize logger with DEBUG level
+	if err := logger.Init(logger.DEBUG, logDir); err != nil {
+		t.Fatalf("Failed to initialize logger: %v", err)
+	}
 }
 
 func createSampleTableMetadata() TableMetadata {
 	return TableMetadata{
 		Name: "test_table",
 		Columns: []Column{
-			{Name: "id", DataType: TypeInteger64, IsNullable: false},
+			{Name: "id", DataType: TypeInteger64, IsNullable: false, IsPrimaryKey: true},
 			{Name: "name", DataType: TypeString, Length: 50, IsNullable: true},
 			{Name: "age", DataType: TypeInteger64, IsNullable: true},
 			{Name: "active", DataType: TypeBoolean, IsNullable: false},
 			{Name: "created_at", DataType: TypeTimestamp, IsNullable: false},
 		},
+		Indexes: []IndexMetadata{},
 	}
 }
 

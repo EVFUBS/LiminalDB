@@ -46,6 +46,7 @@ type TableMetadata struct {
 	RowCount    int64
 	DataOffset  uint32
 	ForeignKeys []ForeignKeyConstraint
+	Indexes     []IndexMetadata
 }
 
 type Column struct {
@@ -64,6 +65,13 @@ type ForeignKeyConstraint struct {
 type ForeignKeyReference struct {
 	ColumnName           string
 	ReferencedColumnName string
+}
+
+type IndexMetadata struct {
+	Name      string
+	Columns   []string
+	IsUnique  bool
+	IsPrimary bool
 }
 
 type ColumnType int8

@@ -55,6 +55,26 @@ func TestSerializeMetadata(t *testing.T) {
 				IsNullable: false,
 			},
 		},
+		Indexes: []IndexMetadata{
+			{
+				Name:      "pk_test_table",
+				Columns:   []string{"id"},
+				IsUnique:  true,
+				IsPrimary: true,
+			},
+			{
+				Name:      "idx_name",
+				Columns:   []string{"name"},
+				IsUnique:  false,
+				IsPrimary: false,
+			},
+			{
+				Name:      "idx_composite",
+				Columns:   []string{"name", "age"},
+				IsUnique:  true,
+				IsPrimary: false,
+			},
+		},
 	}
 
 	serializer := BinarySerializer{}
@@ -95,6 +115,32 @@ func TestSerializeMetadata(t *testing.T) {
 		}
 		if col.IsPrimaryKey != metadata.Columns[i].IsPrimaryKey {
 			t.Errorf("Column %d primary key mismatch: got %v, want %v", i, col.IsPrimaryKey, metadata.Columns[i].IsPrimaryKey)
+		}
+	}
+
+	// Test indexes
+	if len(deserialized.Indexes) != len(metadata.Indexes) {
+		t.Errorf("Indexes length mismatch: got %v, want %v", len(deserialized.Indexes), len(metadata.Indexes))
+	} else {
+		for i, idx := range deserialized.Indexes {
+			if idx.Name != metadata.Indexes[i].Name {
+				t.Errorf("Index %d name mismatch: got %v, want %v", i, idx.Name, metadata.Indexes[i].Name)
+			}
+			if idx.IsUnique != metadata.Indexes[i].IsUnique {
+				t.Errorf("Index %d unique flag mismatch: got %v, want %v", i, idx.IsUnique, metadata.Indexes[i].IsUnique)
+			}
+			if idx.IsPrimary != metadata.Indexes[i].IsPrimary {
+				t.Errorf("Index %d primary flag mismatch: got %v, want %v", i, idx.IsPrimary, metadata.Indexes[i].IsPrimary)
+			}
+			if len(idx.Columns) != len(metadata.Indexes[i].Columns) {
+				t.Errorf("Index %d columns length mismatch: got %v, want %v", i, len(idx.Columns), len(metadata.Indexes[i].Columns))
+			} else {
+				for j, col := range idx.Columns {
+					if col != metadata.Indexes[i].Columns[j] {
+						t.Errorf("Index %d column %d mismatch: got %v, want %v", i, j, col, metadata.Indexes[i].Columns[j])
+					}
+				}
+			}
 		}
 	}
 }
