@@ -14,6 +14,9 @@ const (
 	TypeTimestamp
 )
 
+const MagicNumber uint32 = 0x4D444247
+const CurrentVersion uint16 = 1
+
 const (
 	DatabaseDir   = "db"
 	FileExtension = ".bin"
@@ -34,7 +37,7 @@ type Table struct {
 }
 
 type FileHeader struct {
-	Magic          uint32 // Magic number to identify our file type
+	Magic          uint32 // Magic number to identify file type
 	Version        uint16 // File format version
 	MetadataLength uint32 // Length of the metadata section
 }

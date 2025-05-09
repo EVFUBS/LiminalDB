@@ -91,11 +91,8 @@ func Repl() {
 
 		logger.Debug("Processing command: %s", input)
 
-		lexer := NewLexer(input)
-		parser := NewParser(lexer)
-		evaluator := NewEvaluator(parser)
+		result, err := Execute(input)
 
-		result, err := evaluator.Execute(input)
 		if err != nil {
 			logger.Error("Command execution failed: %v", err)
 			fmt.Printf("Error: %v\n", err)
@@ -113,6 +110,13 @@ func Repl() {
 	}
 
 	logger.Info("REPL session ended")
+}
+
+func Execute(sql string) (any, error) {
+	lexer := NewLexer(sql)
+	parser := NewParser(lexer)
+	evaluator := NewEvaluator(parser)
+	return evaluator.Execute(sql)
 }
 
 // Result formatting functions

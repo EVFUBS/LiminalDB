@@ -1,6 +1,7 @@
 package interpreter
 
 import (
+	"LiminalDb/internal/ast"
 	"LiminalDb/internal/database"
 	"fmt"
 	"strconv"
@@ -24,158 +25,12 @@ func NewParser(l *Lexer) *Parser {
 	return p
 }
 
-// Statements
-type Statement interface{}
-
-type SelectStatement struct {
-	Fields    []string
-	TableName string
-	Where     Expression
-}
-
-type InsertStatement struct {
-	TableName  string
-	Columns    []string
-	ValueLists [][]Expression
-}
-
-type CreateTableStatement struct {
-	TableName string
-	Columns   []database.Column
-}
-
-type DeleteStatement struct {
-	TableName string
-	Where     Expression
-}
-
-type DropTableStatement struct {
-	TableName string
-}
-
-type DescribeTableStatement struct {
-	TableName string
-}
-
-type CreateIndexStatement struct {
-	IndexName string
-	TableName string
-	Columns   []string
-	IsUnique  bool
-}
-
-type DropIndexStatement struct {
-	IndexName string
-	TableName string
-}
-
-type ShowIndexesStatement struct {
-	TableName string
-}
-
-type CreateProcedureStatement struct {
-	Name        string
-	Parameters  []database.Column
-	Body        string
-	Description string
-}
-
-type AlterProcedureStatement struct {
-	Name        string
-	Parameters  []database.Column
-	Body        string
-	Description string
-}
-
-type ExecStatement struct {
-	Name       string
-	Parameters []Expression
-}
-
-// Expressions
-type Expression interface {
-	GetValue() interface{}
-}
-
-type WhereExpression struct {
-	Left  Expression
-	Right Expression
-	Op    string
-}
-
-func (w *WhereExpression) GetValue() interface{} {
-	return nil
-}
-
-type AllExpression struct {
-}
-
-func (a *AllExpression) GetValue() interface{} {
-	return nil
-}
-
-type Identifier struct {
-	Value string
-}
-
-func (i *Identifier) GetValue() interface{} {
-	return i.Value
-}
-
-type StringLiteral struct {
-	Value string
-}
-
-func (s *StringLiteral) GetValue() interface{} {
-	return s.Value
-}
-
-type Int64Literal struct {
-	Value int64
-}
-
-func (i *Int64Literal) GetValue() interface{} {
-	return i.Value
-}
-
-type Float64Literal struct {
-	Value float64
-}
-
-func (f *Float64Literal) GetValue() interface{} {
-	return f.Value
-}
-
-type BooleanLiteral struct {
-	Value bool
-}
-
-func (b *BooleanLiteral) GetValue() interface{} {
-	return b.Value
-}
-
-type Literal struct {
-	Value interface{}
-}
-
-func (l *Literal) GetValue() interface{} {
-	return l.Value
-}
-
-type VariableExpression struct {
-	Name string
-}
-
-func (v *VariableExpression) GetValue() interface{} {
-	return v.Name
-}
-
 func (p *Parser) nextToken() {
 	p.curToken = p.peekToken
 	p.peekToken = p.lexer.NextToken()
 }
 
-func (p *Parser) ParseStatement() (Statement, error) {
+func (p *Parser) ParseStatement() (ast.Statement, error) {
 	switch p.curToken.Type {
 	case SELECT:
 		return p.parseSelectStatement()
@@ -201,8 +56,8 @@ func (p *Parser) ParseStatement() (Statement, error) {
 	}
 }
 
-func (p *Parser) parseSelectStatement() (*SelectStatement, error) {
-	stmt := &SelectStatement{}
+func (p *Parser) parseSelectStatement() (*ast.SelectStatement, error) {
+	stmt := &ast.SelectStatement{}
 
 	if !p.expectPeek(IDENT) {
 		if !p.expectPeek(ALL) {
@@ -235,8 +90,8 @@ func (p *Parser) parseSelectStatement() (*SelectStatement, error) {
 	return stmt, nil
 }
 
-func (p *Parser) parseInsertStatement() (*InsertStatement, error) {
-	stmt := &InsertStatement{}
+func (p *Parser) parseInsertStatement() (*ast.InsertStatement, error) {
+	stmt := &ast.InsertStatement{}
 
 	if !p.expectPeek(INTO) {
 		return nil, fmt.Errorf("expected into, got %s", p.curToken.Literal)
@@ -269,7 +124,7 @@ func (p *Parser) parseInsertStatement() (*InsertStatement, error) {
 	return stmt, nil
 }
 
-func (p *Parser) parseCreateStatement() (Statement, error) {
+func (p *Parser) parseCreateStatement() (ast.Statement, error) {
 	if !p.expectPeek(TABLE) && !p.expectPeek(PROCEDURE) && !p.expectPeek(INDEX) && !p.expectPeek(UNIQUE) {
 		return nil, fmt.Errorf("expected table, procedure, index, or unique, got %s", p.curToken.Literal)
 	}
@@ -292,8 +147,8 @@ func (p *Parser) parseCreateStatement() (Statement, error) {
 	}
 }
 
-func (p *Parser) parseCreateIndexStatement(isUnique bool) (*CreateIndexStatement, error) {
-	stmt := &CreateIndexStatement{
+func (p *Parser) parseCreateIndexStatement(isUnique bool) (*ast.CreateIndexStatement, error) {
+	stmt := &ast.CreateIndexStatement{
 		IsUnique: isUnique,
 	}
 
@@ -327,8 +182,8 @@ func (p *Parser) parseCreateIndexStatement(isUnique bool) (*CreateIndexStatement
 	return stmt, nil
 }
 
-func (p *Parser) parseCreateTableStatement() (*CreateTableStatement, error) {
-	stmt := &CreateTableStatement{}
+func (p *Parser) parseCreateTableStatement() (*ast.CreateTableStatement, error) {
+	stmt := &ast.CreateTableStatement{}
 
 	if !p.expectPeek(IDENT) {
 		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
@@ -348,8 +203,8 @@ func (p *Parser) parseCreateTableStatement() (*CreateTableStatement, error) {
 	return stmt, nil
 }
 
-func (p *Parser) parseDeleteStatement() (*DeleteStatement, error) {
-	stmt := &DeleteStatement{}
+func (p *Parser) parseDeleteStatement() (*ast.DeleteStatement, error) {
+	stmt := &ast.DeleteStatement{}
 
 	if !p.expectPeek(FROM) {
 		return nil, fmt.Errorf("expected from, got %s", p.curToken.Literal)
@@ -370,7 +225,7 @@ func (p *Parser) parseDeleteStatement() (*DeleteStatement, error) {
 	return stmt, nil
 }
 
-func (p *Parser) parseDropStatement() (Statement, error) {
+func (p *Parser) parseDropStatement() (ast.Statement, error) {
 	if !p.expectPeek(TABLE) && !p.expectPeek(INDEX) {
 		return nil, fmt.Errorf("expected table or index, got %s", p.curToken.Literal)
 	}
@@ -385,8 +240,8 @@ func (p *Parser) parseDropStatement() (Statement, error) {
 	}
 }
 
-func (p *Parser) parseDropTableStatement() (*DropTableStatement, error) {
-	stmt := &DropTableStatement{}
+func (p *Parser) parseDropTableStatement() (*ast.DropTableStatement, error) {
+	stmt := &ast.DropTableStatement{}
 
 	if !p.expectPeek(IDENT) {
 		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
@@ -397,8 +252,8 @@ func (p *Parser) parseDropTableStatement() (*DropTableStatement, error) {
 	return stmt, nil
 }
 
-func (p *Parser) parseDropIndexStatement() (*DropIndexStatement, error) {
-	stmt := &DropIndexStatement{}
+func (p *Parser) parseDropIndexStatement() (*ast.DropIndexStatement, error) {
+	stmt := &ast.DropIndexStatement{}
 
 	if !p.expectPeek(IDENT) {
 		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
@@ -419,7 +274,7 @@ func (p *Parser) parseDropIndexStatement() (*DropIndexStatement, error) {
 	return stmt, nil
 }
 
-func (p *Parser) parseShowStatement() (Statement, error) {
+func (p *Parser) parseShowStatement() (ast.Statement, error) {
 	if !p.expectPeek(INDEXES) {
 		return nil, fmt.Errorf("expected INDEXES, got %s", p.curToken.Literal)
 	}
@@ -432,15 +287,15 @@ func (p *Parser) parseShowStatement() (Statement, error) {
 		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
 	}
 
-	stmt := &ShowIndexesStatement{
+	stmt := &ast.ShowIndexesStatement{
 		TableName: p.curToken.Literal,
 	}
 
 	return stmt, nil
 }
 
-func (p *Parser) parseDescribeTableStatement() (*DescribeTableStatement, error) {
-	stmt := &DescribeTableStatement{}
+func (p *Parser) parseDescribeTableStatement() (*ast.DescribeTableStatement, error) {
+	stmt := &ast.DescribeTableStatement{}
 
 	if !p.expectPeek(TABLE) {
 		return nil, fmt.Errorf("expected table, got %s", p.curToken.Literal)
@@ -455,15 +310,15 @@ func (p *Parser) parseDescribeTableStatement() (*DescribeTableStatement, error) 
 	return stmt, nil
 }
 
-func (p *Parser) parseAlterStatement() (Statement, error) {
+func (p *Parser) parseAlterStatement() (ast.Statement, error) {
 	if !p.expectPeek(PROCEDURE) {
 		return nil, fmt.Errorf("expected procedure, got %s", p.curToken.Literal)
 	}
 	return p.parseAlterProcedureStatement()
 }
 
-func (p *Parser) parseCreateProcedureStatement() (*CreateProcedureStatement, error) {
-	stmt := &CreateProcedureStatement{}
+func (p *Parser) parseCreateProcedureStatement() (*ast.CreateProcedureStatement, error) {
+	stmt := &ast.CreateProcedureStatement{}
 
 	if !p.expectPeek(IDENT) {
 		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
@@ -487,8 +342,8 @@ func (p *Parser) parseCreateProcedureStatement() (*CreateProcedureStatement, err
 	return stmt, nil
 }
 
-func (p *Parser) parseAlterProcedureStatement() (*AlterProcedureStatement, error) {
-	stmt := &AlterProcedureStatement{}
+func (p *Parser) parseAlterProcedureStatement() (*ast.AlterProcedureStatement, error) {
+	stmt := &ast.AlterProcedureStatement{}
 
 	if !p.expectPeek(IDENT) {
 		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
@@ -636,13 +491,14 @@ func (p *Parser) parseColumnDefinition() *database.Column {
 			return nil
 		}
 		col.IsPrimaryKey = true
+		col.IsNullable = false
 	}
 
 	return col
 }
 
-func (p *Parser) parseExecStatement() (*ExecStatement, error) {
-	stmt := &ExecStatement{}
+func (p *Parser) parseExecStatement() (*ast.ExecStatement, error) {
+	stmt := &ast.ExecStatement{}
 
 	if !p.expectPeek(IDENT) {
 		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
@@ -672,7 +528,7 @@ func (p *Parser) parseIdentifierList() []string {
 	return identifiers
 }
 
-func (p *Parser) parseExpression() Expression {
+func (p *Parser) parseExpression() ast.Expression {
 	switch {
 	case p.peekTokenIs(ASSIGN) || p.peekTokenIs(LESS_THAN) || p.peekTokenIs(LESS_THAN_OR_EQ) || p.peekTokenIs(GREATER_THAN) || p.peekTokenIs(GREATER_THAN_OR_EQ):
 		return p.parseAssignment()
@@ -693,7 +549,7 @@ func (p *Parser) parseExpression() Expression {
 	}
 }
 
-func (p *Parser) parseLiteral() Expression {
+func (p *Parser) parseLiteral() ast.Expression {
 	switch p.curToken.Type {
 	case STRING:
 		return p.parseStringLiteral()
@@ -708,45 +564,45 @@ func (p *Parser) parseLiteral() Expression {
 	}
 }
 
-func (p *Parser) parseStringLiteral() Expression {
-	return &StringLiteral{Value: p.curToken.Literal}
+func (p *Parser) parseStringLiteral() ast.Expression {
+	return &ast.StringLiteral{Value: p.curToken.Literal}
 }
 
-func (p *Parser) parseIntLiteral() Expression {
+func (p *Parser) parseIntLiteral() ast.Expression {
 	value, err := strconv.Atoi(p.curToken.Literal)
 	if err != nil {
 		return nil
 	}
-	return &Int64Literal{Value: int64(value)}
+	return &ast.Int64Literal{Value: int64(value)}
 }
 
-func (p *Parser) parseFloatLiteral() Expression {
+func (p *Parser) parseFloatLiteral() ast.Expression {
 	value, err := strconv.ParseFloat(p.curToken.Literal, 64)
 	if err != nil {
 		return nil
 	}
-	return &Float64Literal{Value: value}
+	return &ast.Float64Literal{Value: value}
 }
 
-func (p *Parser) parseBooleanLiteral() Expression {
+func (p *Parser) parseBooleanLiteral() ast.Expression {
 	value, err := strconv.ParseBool(p.curToken.Literal)
 	if err != nil {
 		return nil
 	}
-	return &BooleanLiteral{Value: value}
+	return &ast.BooleanLiteral{Value: value}
 }
 
-func (p *Parser) parseIdentifier() Expression {
-	return &Identifier{Value: p.curToken.Literal}
+func (p *Parser) parseIdentifier() ast.Expression {
+	return &ast.Identifier{Value: p.curToken.Literal}
 }
 
-func (p *Parser) parseVariable() Expression {
+func (p *Parser) parseVariable() ast.Expression {
 	name := p.curToken.Literal[1:]
-	return &VariableExpression{Name: name}
+	return &ast.VariableExpression{Name: name}
 }
 
-func (p *Parser) parseAssignment() Expression {
-	expr := &WhereExpression{
+func (p *Parser) parseAssignment() ast.Expression {
+	expr := &ast.WhereExpression{
 		Left: p.parseIdentifier(),
 	}
 
@@ -762,12 +618,12 @@ func (p *Parser) parseAssignment() Expression {
 	return expr
 }
 
-func (p *Parser) parseAllExpression() Expression {
-	return &AllExpression{}
+func (p *Parser) parseAllExpression() ast.Expression {
+	return &ast.AllExpression{}
 }
 
-func (p *Parser) parseValueLists() [][]Expression {
-	valueLists := [][]Expression{}
+func (p *Parser) parseValueLists() [][]ast.Expression {
+	valueLists := [][]ast.Expression{}
 
 	values := p.parseValueList()
 	if values != nil {
@@ -786,8 +642,8 @@ func (p *Parser) parseValueLists() [][]Expression {
 	return valueLists
 }
 
-func (p *Parser) parseValueList() []Expression {
-	values := []Expression{}
+func (p *Parser) parseValueList() []ast.Expression {
+	values := []ast.Expression{}
 
 	if !p.curTokenIs(LPAREN) && !p.expectPeek(LPAREN) {
 		return nil

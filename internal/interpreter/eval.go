@@ -1,7 +1,9 @@
 package interpreter
 
 import (
+	"LiminalDb/internal/ast"
 	"LiminalDb/internal/database"
+	"LiminalDb/internal/database/operations"
 	"LiminalDb/internal/logger"
 	"LiminalDb/internal/storedproc"
 	"fmt"
@@ -10,13 +12,13 @@ import (
 
 type Evaluator struct {
 	parser     *Parser
-	operations database.Operations
+	operations operations.Operations
 }
 
 func NewEvaluator(parser *Parser) *Evaluator {
 	return &Evaluator{
 		parser:     parser,
-		operations: &database.OperationsImpl{},
+		operations: &operations.OperationsImpl{},
 	}
 }
 
@@ -43,33 +45,33 @@ func (e *Evaluator) Execute(query string) (interface{}, error) {
 	return result, nil
 }
 
-func (e *Evaluator) executeStatement(stmt Statement) (interface{}, error) {
+func (e *Evaluator) executeStatement(stmt ast.Statement) (interface{}, error) {
 	logger.Debug("Executing statement of type: %T", stmt)
 
 	switch stmt := stmt.(type) {
-	case *SelectStatement:
+	case *ast.SelectStatement:
 		return e.executeSelect(stmt)
-	case *InsertStatement:
+	case *ast.InsertStatement:
 		return e.executeInsert(stmt)
-	case *CreateTableStatement:
+	case *ast.CreateTableStatement:
 		return e.executeCreateTable(stmt)
-	case *DeleteStatement:
+	case *ast.DeleteStatement:
 		return e.executeDelete(stmt)
-	case *DropTableStatement:
+	case *ast.DropTableStatement:
 		return e.executeDropTable(stmt)
-	case *DescribeTableStatement:
+	case *ast.DescribeTableStatement:
 		return e.executeDescribeTable(stmt)
-	case *CreateProcedureStatement:
+	case *ast.CreateProcedureStatement:
 		return e.executeCreateProcedure(stmt)
-	case *AlterProcedureStatement:
+	case *ast.AlterProcedureStatement:
 		return e.executeAlterProcedure(stmt)
-	case *ExecStatement:
+	case *ast.ExecStatement:
 		return e.executeStoredProcedure(stmt)
-	case *CreateIndexStatement:
+	case *ast.CreateIndexStatement:
 		return e.executeCreateIndex(stmt)
-	case *DropIndexStatement:
+	case *ast.DropIndexStatement:
 		return e.executeDropIndex(stmt)
-	case *ShowIndexesStatement:
+	case *ast.ShowIndexesStatement:
 		return e.executeShowIndexes(stmt)
 	default:
 		logger.Error("Unsupported statement type: %T", stmt)
@@ -77,7 +79,7 @@ func (e *Evaluator) executeStatement(stmt Statement) (interface{}, error) {
 	}
 }
 
-func (e *Evaluator) executeSelect(stmt *SelectStatement) (*database.QueryResult, error) {
+func (e *Evaluator) executeSelect(stmt *ast.SelectStatement) (*database.QueryResult, error) {
 	logger.Debug("Executing SELECT statement on table: %s", stmt.TableName)
 
 	data, err := e.selectData(stmt.TableName, stmt.Fields, stmt.Where)
@@ -90,7 +92,7 @@ func (e *Evaluator) executeSelect(stmt *SelectStatement) (*database.QueryResult,
 	return data, nil
 }
 
-func (e *Evaluator) executeInsert(stmt *InsertStatement) (interface{}, error) {
+func (e *Evaluator) executeInsert(stmt *ast.InsertStatement) (interface{}, error) {
 	logger.Debug("Executing INSERT statement on table: %s", stmt.TableName)
 
 	data, err := e.insertData(stmt.TableName, stmt.Columns, stmt.ValueLists)
@@ -103,7 +105,7 @@ func (e *Evaluator) executeInsert(stmt *InsertStatement) (interface{}, error) {
 	return data, nil
 }
 
-func (e *Evaluator) executeCreateTable(stmt *CreateTableStatement) (interface{}, error) {
+func (e *Evaluator) executeCreateTable(stmt *ast.CreateTableStatement) (interface{}, error) {
 	logger.Debug("Executing CREATE TABLE statement for table: %s", stmt.TableName)
 
 	data, err := e.createTable(stmt.TableName, stmt.Columns)
@@ -116,7 +118,7 @@ func (e *Evaluator) executeCreateTable(stmt *CreateTableStatement) (interface{},
 	return data, nil
 }
 
-func (e *Evaluator) executeDelete(stmt *DeleteStatement) (interface{}, error) {
+func (e *Evaluator) executeDelete(stmt *ast.DeleteStatement) (interface{}, error) {
 	logger.Debug("Executing DELETE statement on table: %s", stmt.TableName)
 
 	data, err := e.deleteData(stmt.TableName, stmt.Where)
@@ -129,7 +131,7 @@ func (e *Evaluator) executeDelete(stmt *DeleteStatement) (interface{}, error) {
 	return data, nil
 }
 
-func (e *Evaluator) executeDropTable(stmt *DropTableStatement) (interface{}, error) {
+func (e *Evaluator) executeDropTable(stmt *ast.DropTableStatement) (interface{}, error) {
 	logger.Debug("Executing DROP TABLE statement for table: %s", stmt.TableName)
 
 	data, err := e.dropTable(stmt.TableName)
@@ -142,7 +144,7 @@ func (e *Evaluator) executeDropTable(stmt *DropTableStatement) (interface{}, err
 	return data, nil
 }
 
-func (e *Evaluator) executeDescribeTable(stmt *DescribeTableStatement) (interface{}, error) {
+func (e *Evaluator) executeDescribeTable(stmt *ast.DescribeTableStatement) (interface{}, error) {
 	logger.Debug("Executing DESCRIBE TABLE statement for table: %s", stmt.TableName)
 
 	data, err := e.describeTable(stmt.TableName)
@@ -155,7 +157,7 @@ func (e *Evaluator) executeDescribeTable(stmt *DescribeTableStatement) (interfac
 	return data, nil
 }
 
-func (e *Evaluator) executeCreateProcedure(stmt *CreateProcedureStatement) (interface{}, error) {
+func (e *Evaluator) executeCreateProcedure(stmt *ast.CreateProcedureStatement) (interface{}, error) {
 	logger.Debug("Executing CREATE PROCEDURE statement for procedure: %s", stmt.Name)
 
 	proc := storedproc.NewStoredProc(
@@ -175,7 +177,7 @@ func (e *Evaluator) executeCreateProcedure(stmt *CreateProcedureStatement) (inte
 	return "Stored procedure created successfully", nil
 }
 
-func (e *Evaluator) executeAlterProcedure(stmt *AlterProcedureStatement) (interface{}, error) {
+func (e *Evaluator) executeAlterProcedure(stmt *ast.AlterProcedureStatement) (interface{}, error) {
 	logger.Debug("Executing ALTER PROCEDURE statement for procedure: %s", stmt.Name)
 
 	proc := storedproc.NewStoredProc(
@@ -195,7 +197,7 @@ func (e *Evaluator) executeAlterProcedure(stmt *AlterProcedureStatement) (interf
 	return "Stored procedure altered successfully", nil
 }
 
-func (e *Evaluator) executeStoredProcedure(stmt *ExecStatement) (interface{}, error) {
+func (e *Evaluator) executeStoredProcedure(stmt *ast.ExecStatement) (interface{}, error) {
 	proc := &storedproc.StoredProc{}
 	err := proc.ReadFromFile(stmt.Name)
 	if err != nil {
@@ -255,24 +257,24 @@ func (e *Evaluator) executeStoredProcedure(stmt *ExecStatement) (interface{}, er
 	return lastResult, nil
 }
 
-func (e *Evaluator) Evaluate(expr Expression, row []interface{}, columns []database.Column) (interface{}, error) {
+func (e *Evaluator) Evaluate(expr ast.Expression, row []interface{}, columns []database.Column) (interface{}, error) {
 	switch expr := expr.(type) {
-	case *Identifier:
+	case *ast.Identifier:
 		for i, col := range columns {
 			if col.Name == expr.Value {
 				return row[i], nil
 			}
 		}
 		return nil, fmt.Errorf("column not found: %s", expr.Value)
-	case *StringLiteral:
+	case *ast.StringLiteral:
 		return expr.Value, nil
-	case *Int64Literal:
+	case *ast.Int64Literal:
 		return expr.Value, nil
-	case *Float64Literal:
+	case *ast.Float64Literal:
 		return expr.Value, nil
-	case *BooleanLiteral:
+	case *ast.BooleanLiteral:
 		return expr.Value, nil
-	case *WhereExpression:
+	case *ast.WhereExpression:
 		left, err := e.Evaluate(expr.Left, row, columns)
 		if err != nil {
 			return nil, err
@@ -318,7 +320,7 @@ func (e *Evaluator) Evaluate(expr Expression, row []interface{}, columns []datab
 	}
 }
 
-func (e *Evaluator) selectData(tableName string, fields []string, where Expression) (*database.QueryResult, error) {
+func (e *Evaluator) selectData(tableName string, fields []string, where ast.Expression) (*database.QueryResult, error) {
 	filter := func(row []interface{}, columns []database.Column) (bool, error) {
 		if where == nil {
 			return true, nil
@@ -330,10 +332,10 @@ func (e *Evaluator) selectData(tableName string, fields []string, where Expressi
 		return matches.(bool), nil
 	}
 
-	return e.operations.ReadRows(tableName, fields, filter)
+	return e.operations.ReadRows(tableName, fields, filter, where)
 }
 
-func (e *Evaluator) insertData(tableName string, fields []string, values [][]Expression) (interface{}, error) {
+func (e *Evaluator) insertData(tableName string, fields []string, values [][]ast.Expression) (interface{}, error) {
 	data := [][]interface{}{}
 	for _, value := range values {
 		row := make([]interface{}, len(fields))
@@ -369,7 +371,7 @@ func (e *Evaluator) createTable(tableName string, columns []database.Column) (in
 	return "Create table successful", nil
 }
 
-func (e *Evaluator) deleteData(tableName string, where Expression) (interface{}, error) {
+func (e *Evaluator) deleteData(tableName string, where ast.Expression) (interface{}, error) {
 	filter := func(row []interface{}, columns []database.Column) (bool, error) {
 		if where == nil {
 			return true, nil
@@ -410,7 +412,7 @@ func (e *Evaluator) describeTable(tableName string) (interface{}, error) {
 	return metadata, nil
 }
 
-func (e *Evaluator) executeCreateIndex(stmt *CreateIndexStatement) (interface{}, error) {
+func (e *Evaluator) executeCreateIndex(stmt *ast.CreateIndexStatement) (interface{}, error) {
 	logger.Debug("Executing CREATE INDEX statement for index: %s on table: %s", stmt.IndexName, stmt.TableName)
 
 	err := e.operations.CreateIndex(stmt.TableName, stmt.IndexName, stmt.Columns, stmt.IsUnique)
@@ -423,7 +425,7 @@ func (e *Evaluator) executeCreateIndex(stmt *CreateIndexStatement) (interface{},
 	return "Create index successful", nil
 }
 
-func (e *Evaluator) executeDropIndex(stmt *DropIndexStatement) (interface{}, error) {
+func (e *Evaluator) executeDropIndex(stmt *ast.DropIndexStatement) (interface{}, error) {
 	logger.Debug("Executing DROP INDEX statement for index: %s on table: %s", stmt.IndexName, stmt.TableName)
 
 	err := e.operations.DropIndex(stmt.TableName, stmt.IndexName)
@@ -436,7 +438,7 @@ func (e *Evaluator) executeDropIndex(stmt *DropIndexStatement) (interface{}, err
 	return "Drop index successful", nil
 }
 
-func (e *Evaluator) executeShowIndexes(stmt *ShowIndexesStatement) (interface{}, error) {
+func (e *Evaluator) executeShowIndexes(stmt *ast.ShowIndexesStatement) (interface{}, error) {
 	logger.Debug("Executing SHOW INDEXES statement for table: %s", stmt.TableName)
 
 	indexes, err := e.operations.ListIndexes(stmt.TableName)
