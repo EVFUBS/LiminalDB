@@ -14,6 +14,9 @@ const (
 	TypeTimestamp
 )
 
+const MagicNumber uint32 = 0x4D444247
+const CurrentVersion uint16 = 1
+
 const (
 	DatabaseDir   = "db"
 	FileExtension = ".bin"
@@ -34,7 +37,7 @@ type Table struct {
 }
 
 type FileHeader struct {
-	Magic          uint32 // Magic number to identify our file type
+	Magic          uint32 // Magic number to identify file type
 	Version        uint16 // File format version
 	MetadataLength uint32 // Length of the metadata section
 }
@@ -46,6 +49,7 @@ type TableMetadata struct {
 	RowCount    int64
 	DataOffset  uint32
 	ForeignKeys []ForeignKeyConstraint
+	Indexes     []IndexMetadata
 }
 
 type Column struct {
@@ -64,6 +68,13 @@ type ForeignKeyConstraint struct {
 type ForeignKeyReference struct {
 	ColumnName           string
 	ReferencedColumnName string
+}
+
+type IndexMetadata struct {
+	Name      string
+	Columns   []string
+	IsUnique  bool
+	IsPrimary bool
 }
 
 type ColumnType int8

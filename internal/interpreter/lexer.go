@@ -198,6 +198,10 @@ const (
 	FOREIGN    = "FOREIGN"
 	REFERENCES = "REFERENCES"
 	ON         = "ON"
+	INDEX      = "INDEX"
+	UNIQUE     = "UNIQUE"
+	SHOW       = "SHOW"
+	INDEXES    = "INDEXES"
 
 	// Stored Procedure Keywords
 	PROCEDURE = "PROCEDURE"
@@ -237,6 +241,10 @@ var keywords = map[string]TokenType{
 	"foreign":    FOREIGN,
 	"references": REFERENCES,
 	"on":         ON,
+	"index":      INDEX,
+	"unique":     UNIQUE,
+	"show":       SHOW,
+	"indexes":    INDEXES,
 	"procedure":  PROCEDURE,
 	"alter":      ALTER,
 	"as":         AS,

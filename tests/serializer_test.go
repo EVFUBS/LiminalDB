@@ -1,18 +1,19 @@
-package database
+package tests
 
 import (
+	"LiminalDb/internal/database"
 	"bytes"
 	"testing"
 	"time"
 )
 
 func TestSerializeHeader(t *testing.T) {
-	header := FileHeader{
-		Magic:   MagicNumber,
-		Version: CurrentVersion,
+	header := database.FileHeader{
+		Magic:   database.MagicNumber,
+		Version: database.CurrentVersion,
 	}
 
-	serializer := BinarySerializer{}
+	serializer := database.BinarySerializer{}
 	data, err := serializer.SerializeHeader(header)
 	if err != nil {
 		t.Fatalf("Failed to serialize header: %v", err)
@@ -33,31 +34,51 @@ func TestSerializeHeader(t *testing.T) {
 }
 
 func TestSerializeMetadata(t *testing.T) {
-	metadata := TableMetadata{
+	metadata := database.TableMetadata{
 		Name:        "test_table",
 		ColumnCount: 3,
-		Columns: []Column{
+		Columns: []database.Column{
 			{
 				Name:         "id",
-				DataType:     TypeInteger64,
+				DataType:     database.TypeInteger64,
 				IsNullable:   false,
 				IsPrimaryKey: true,
 			},
 			{
 				Name:       "name",
-				DataType:   TypeString,
+				DataType:   database.TypeString,
 				Length:     100,
 				IsNullable: true,
 			},
 			{
 				Name:       "age",
-				DataType:   TypeInteger64,
+				DataType:   database.TypeInteger64,
 				IsNullable: false,
+			},
+		},
+		Indexes: []database.IndexMetadata{
+			{
+				Name:      "pk_test_table",
+				Columns:   []string{"id"},
+				IsUnique:  true,
+				IsPrimary: true,
+			},
+			{
+				Name:      "idx_name",
+				Columns:   []string{"name"},
+				IsUnique:  false,
+				IsPrimary: false,
+			},
+			{
+				Name:      "idx_composite",
+				Columns:   []string{"name", "age"},
+				IsUnique:  true,
+				IsPrimary: false,
 			},
 		},
 	}
 
-	serializer := BinarySerializer{}
+	serializer := database.BinarySerializer{}
 	data, _, err := serializer.SerializeMetadata(metadata)
 	if err != nil {
 		t.Fatalf("Failed to serialize metadata: %v", err)
@@ -97,15 +118,41 @@ func TestSerializeMetadata(t *testing.T) {
 			t.Errorf("Column %d primary key mismatch: got %v, want %v", i, col.IsPrimaryKey, metadata.Columns[i].IsPrimaryKey)
 		}
 	}
+
+	// Test indexes
+	if len(deserialized.Indexes) != len(metadata.Indexes) {
+		t.Errorf("Indexes length mismatch: got %v, want %v", len(deserialized.Indexes), len(metadata.Indexes))
+	} else {
+		for i, idx := range deserialized.Indexes {
+			if idx.Name != metadata.Indexes[i].Name {
+				t.Errorf("Index %d name mismatch: got %v, want %v", i, idx.Name, metadata.Indexes[i].Name)
+			}
+			if idx.IsUnique != metadata.Indexes[i].IsUnique {
+				t.Errorf("Index %d unique flag mismatch: got %v, want %v", i, idx.IsUnique, metadata.Indexes[i].IsUnique)
+			}
+			if idx.IsPrimary != metadata.Indexes[i].IsPrimary {
+				t.Errorf("Index %d primary flag mismatch: got %v, want %v", i, idx.IsPrimary, metadata.Indexes[i].IsPrimary)
+			}
+			if len(idx.Columns) != len(metadata.Indexes[i].Columns) {
+				t.Errorf("Index %d columns length mismatch: got %v, want %v", i, len(idx.Columns), len(metadata.Indexes[i].Columns))
+			} else {
+				for j, col := range idx.Columns {
+					if col != metadata.Indexes[i].Columns[j] {
+						t.Errorf("Index %d column %d mismatch: got %v, want %v", i, j, col, metadata.Indexes[i].Columns[j])
+					}
+				}
+			}
+		}
+	}
 }
 
 func TestSerializeRow(t *testing.T) {
-	columns := []Column{
-		{Name: "id", DataType: TypeInteger64},
-		{Name: "name", DataType: TypeString, Length: 100},
-		{Name: "age", DataType: TypeInteger64},
-		{Name: "active", DataType: TypeBoolean},
-		{Name: "created_at", DataType: TypeTimestamp},
+	columns := []database.Column{
+		{Name: "id", DataType: database.TypeInteger64},
+		{Name: "name", DataType: database.TypeString, Length: 100},
+		{Name: "age", DataType: database.TypeInteger64},
+		{Name: "active", DataType: database.TypeBoolean},
+		{Name: "created_at", DataType: database.TypeTimestamp},
 	}
 
 	now := time.Now()
@@ -117,7 +164,7 @@ func TestSerializeRow(t *testing.T) {
 		now,
 	}
 
-	serializer := BinarySerializer{}
+	serializer := database.BinarySerializer{}
 	data, err := serializer.SerializeRow(row, columns)
 	if err != nil {
 		t.Fatalf("Failed to serialize row: %v", err)
@@ -155,30 +202,30 @@ func TestSerializeRow(t *testing.T) {
 }
 
 func TestSerializeTable(t *testing.T) {
-	table := Table{
-		Header: FileHeader{
-			Magic:   MagicNumber,
-			Version: CurrentVersion,
+	table := &database.Table{
+		Header: database.FileHeader{
+			Magic:   database.MagicNumber,
+			Version: database.CurrentVersion,
 		},
-		Metadata: TableMetadata{
+		Metadata: database.TableMetadata{
 			Name:        "test_table",
 			ColumnCount: 3,
-			Columns: []Column{
+			Columns: []database.Column{
 				{
 					Name:         "id",
-					DataType:     TypeInteger64,
+					DataType:     database.TypeInteger64,
 					IsNullable:   false,
 					IsPrimaryKey: true,
 				},
 				{
 					Name:       "name",
-					DataType:   TypeString,
+					DataType:   database.TypeString,
 					Length:     100,
 					IsNullable: true,
 				},
 				{
 					Name:       "age",
-					DataType:   TypeInteger64,
+					DataType:   database.TypeInteger64,
 					IsNullable: false,
 				},
 			},
@@ -189,7 +236,7 @@ func TestSerializeTable(t *testing.T) {
 		},
 	}
 
-	serializer := BinarySerializer{}
+	serializer := database.BinarySerializer{}
 	data, err := serializer.SerializeTable(table)
 	if err != nil {
 		t.Fatalf("Failed to serialize table: %v", err)
@@ -244,13 +291,13 @@ func TestSerializeTable(t *testing.T) {
 }
 
 func TestInvalidDataTypes(t *testing.T) {
-	columns := []Column{
-		{Name: "id", DataType: TypeInteger64},
+	columns := []database.Column{
+		{Name: "id", DataType: database.TypeInteger64},
 	}
 
 	// Test invalid data type
 	row := []interface{}{"not an integer"}
-	serializer := BinarySerializer{}
+	serializer := database.BinarySerializer{}
 	_, err := serializer.SerializeRow(row, columns)
 	if err == nil {
 		t.Error("Expected error for invalid data type, got nil")
@@ -258,13 +305,13 @@ func TestInvalidDataTypes(t *testing.T) {
 }
 
 func TestStringLengthExceeded(t *testing.T) {
-	columns := []Column{
-		{Name: "name", DataType: TypeString, Length: 5},
+	columns := []database.Column{
+		{Name: "name", DataType: database.TypeString, Length: 5},
 	}
 
 	// Test string exceeding length
 	row := []interface{}{"too long string"}
-	serializer := BinarySerializer{}
+	serializer := database.BinarySerializer{}
 	_, err := serializer.SerializeRow(row, columns)
 	if err == nil {
 		t.Error("Expected error for string exceeding length, got nil")

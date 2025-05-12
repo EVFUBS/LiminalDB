@@ -70,6 +70,14 @@ func Init(logLevel LogLevel, logDir string) error {
 	return nil
 }
 
+func SetupLogger() {
+	logDir := filepath.Join("logs")
+	if err := Init(INFO, logDir); err != nil {
+		fmt.Printf("Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+}
+
 func Info(format string, v ...interface{}) {
 	InfoLogger.Printf(format, v...)
 }
