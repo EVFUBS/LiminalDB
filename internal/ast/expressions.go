@@ -12,7 +12,7 @@ type WhereExpression struct {
 }
 
 func (w *WhereExpression) GetValue() interface{} {
-	return nil
+	return w.Right.GetValue()
 }
 
 type AllExpression struct {
@@ -76,4 +76,14 @@ type VariableExpression struct {
 
 func (v *VariableExpression) GetValue() interface{} {
 	return v.Name
+}
+
+type BinaryExpression struct {
+	Left  Expression
+	Right Expression
+	Op    string
+}
+
+func (b *BinaryExpression) GetValue() interface{} {
+	return nil
 }

@@ -60,9 +60,11 @@ func (p *Parser) parseSelectStatement() (*ast.SelectStatement, error) {
 	stmt := &ast.SelectStatement{}
 
 	if !p.expectPeek(IDENT) {
-		if !p.expectPeek(ALL) {
-			return nil, fmt.Errorf("expected identifier or all, got %s", p.curToken.Literal)
+		if !p.expectPeek(MULTIPLY) {
+			return nil, fmt.Errorf("expected identifier or *, got %s", p.curToken.Literal)
 		}
+		// In SELECT statements, * is treated as ALL
+		p.curToken.Type = ALL
 	}
 
 	stmt.Fields = p.parseIdentifierList()
@@ -386,11 +388,6 @@ func (p *Parser) parseProcedureBody() (string, bool, error) {
 			return "", false, fmt.Errorf("expected end, got %s", p.curToken.Literal)
 		}
 
-		stmt, err := p.ParseStatement()
-		if stmt == nil {
-			return "", false, err
-		}
-
 		bodyBuilder.WriteString(p.curToken.Literal)
 		bodyBuilder.WriteString(" ")
 
@@ -528,25 +525,96 @@ func (p *Parser) parseIdentifierList() []string {
 	return identifiers
 }
 
+// Precedence levels
+const (
+	_ int = iota
+	LOWEST
+	LOGICAL    // AND OR
+	EQUALS     // =
+	COMPARISON // < <= > >=
+	SUM        // + -
+	PRODUCT    // * /
+	PREFIX     // -X
+	CALL       // myFunction(X)
+)
+
+var precedences = map[TokenType]int{
+	ASSIGN:             EQUALS,
+	LESS_THAN:          COMPARISON,
+	LESS_THAN_OR_EQ:    COMPARISON,
+	GREATER_THAN:       COMPARISON,
+	GREATER_THAN_OR_EQ: COMPARISON,
+	PLUS:               SUM,
+	MINUS:              SUM,
+	MULTIPLY:           PRODUCT,
+	DIVIDE:             PRODUCT,
+	AND:                LOGICAL,
+	OR:                 LOGICAL,
+}
+
+func (p *Parser) peekPrecedence() int {
+	if p, ok := precedences[p.peekToken.Type]; ok {
+		return p
+	}
+	return LOWEST
+}
+
+func (p *Parser) curPrecedence() int {
+	if p, ok := precedences[p.curToken.Type]; ok {
+		return p
+	}
+	return LOWEST
+}
+
 func (p *Parser) parseExpression() ast.Expression {
+	return p.parseExpressionWithPrecedence(LOWEST)
+}
+
+func (p *Parser) parseExpressionWithPrecedence(precedence int) ast.Expression {
+	var leftExpr ast.Expression
+
+	// Parse prefix expression
 	switch {
-	case p.peekTokenIs(ASSIGN) || p.peekTokenIs(LESS_THAN) || p.peekTokenIs(LESS_THAN_OR_EQ) || p.peekTokenIs(GREATER_THAN) || p.peekTokenIs(GREATER_THAN_OR_EQ):
-		return p.parseAssignment()
 	case p.curToken.Type == VARIABLE:
-		return p.parseVariable()
+		leftExpr = p.parseVariable()
 	case p.curToken.Type == STRING:
-		return p.parseStringLiteral()
+		leftExpr = p.parseStringLiteral()
 	case p.curToken.Type == INT:
-		return p.parseIntLiteral()
+		leftExpr = p.parseIntLiteral()
 	case p.curToken.Type == FLOAT:
-		return p.parseFloatLiteral()
+		leftExpr = p.parseFloatLiteral()
 	case p.curToken.Type == BOOL:
-		return p.parseBooleanLiteral()
+		leftExpr = p.parseBooleanLiteral()
 	case p.curToken.Type == IDENT:
-		return p.parseIdentifier()
+		leftExpr = p.parseIdentifier()
 	default:
 		return nil
 	}
+
+	// Parse infix expressions with higher precedence
+	for !p.peekTokenIs(EOF) && precedence < p.peekPrecedence() {
+		switch p.peekToken.Type {
+		case PLUS, MINUS, MULTIPLY, DIVIDE:
+			p.nextToken()
+			leftExpr = p.parseBinaryExpression(leftExpr)
+		case ASSIGN, LESS_THAN, LESS_THAN_OR_EQ, GREATER_THAN, GREATER_THAN_OR_EQ:
+			if precedence >= EQUALS {
+				return leftExpr
+			}
+			p.nextToken()
+			leftExpr = p.parseComparisonExpression(leftExpr)
+		case AND, OR:
+			if precedence >= LOGICAL {
+				return leftExpr
+			}
+			p.nextToken()
+			leftExpr = p.parseLogicalExpression(leftExpr)
+		default:
+			return leftExpr
+		}
+	}
+
+	return leftExpr
 }
 
 func (p *Parser) parseLiteral() ast.Expression {
@@ -616,6 +684,48 @@ func (p *Parser) parseAssignment() ast.Expression {
 	expr.Right = p.parseExpression()
 
 	return expr
+}
+
+func (p *Parser) parseBinaryExpression(left ast.Expression) ast.Expression {
+	operator := p.curToken.Literal
+	precedence := p.curPrecedence()
+
+	p.nextToken()
+	right := p.parseExpressionWithPrecedence(precedence)
+
+	return &ast.BinaryExpression{
+		Left:  left,
+		Op:    operator,
+		Right: right,
+	}
+}
+
+func (p *Parser) parseComparisonExpression(left ast.Expression) ast.Expression {
+	operator := p.curToken.Literal
+	precedence := p.curPrecedence()
+
+	p.nextToken()
+	right := p.parseExpressionWithPrecedence(precedence)
+
+	return &ast.WhereExpression{
+		Left:  left,
+		Op:    operator,
+		Right: right,
+	}
+}
+
+func (p *Parser) parseLogicalExpression(left ast.Expression) ast.Expression {
+	operator := p.curToken.Literal
+	precedence := p.curPrecedence()
+
+	p.nextToken()
+	right := p.parseExpressionWithPrecedence(precedence)
+
+	return &ast.WhereExpression{
+		Left:  left,
+		Op:    operator,
+		Right: right,
+	}
 }
 
 func (p *Parser) parseAllExpression() ast.Expression {

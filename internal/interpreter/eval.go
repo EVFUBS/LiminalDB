@@ -32,7 +32,7 @@ func (e *Evaluator) Execute(query string) (interface{}, error) {
 	stmt, err := e.parser.ParseStatement()
 	if err != nil || stmt == nil {
 		logger.Error("Failed to parse query: %s with error: %s", query, err)
-		return nil, fmt.Errorf("failed to parse query: %s", query)
+		return nil, fmt.Errorf("failed to parse query: %s with error: %s", query, err)
 	}
 
 	result, err := e.executeStatement(stmt)
@@ -274,6 +274,37 @@ func (e *Evaluator) Evaluate(expr ast.Expression, row []interface{}, columns []d
 		return expr.Value, nil
 	case *ast.BooleanLiteral:
 		return expr.Value, nil
+	case *ast.BinaryExpression:
+		left, err := e.Evaluate(expr.Left, row, columns)
+		if err != nil {
+			return nil, err
+		}
+		right, err := e.Evaluate(expr.Right, row, columns)
+		if err != nil {
+			return nil, err
+		}
+
+		// Convert operands to numeric types if needed
+		leftNum, rightNum, err := convertToNumeric(left, right)
+		if err != nil {
+			return nil, err
+		}
+
+		switch expr.Op {
+		case "+":
+			return leftNum + rightNum, nil
+		case "-":
+			return leftNum - rightNum, nil
+		case "*":
+			return leftNum * rightNum, nil
+		case "/":
+			if rightNum == 0 {
+				return nil, fmt.Errorf("division by zero")
+			}
+			return leftNum / rightNum, nil
+		default:
+			return nil, fmt.Errorf("unsupported binary operator: %s", expr.Op)
+		}
 	case *ast.WhereExpression:
 		left, err := e.Evaluate(expr.Left, row, columns)
 		if err != nil {
@@ -285,8 +316,22 @@ func (e *Evaluator) Evaluate(expr ast.Expression, row []interface{}, columns []d
 		}
 		switch expr.Op {
 		case "=":
+			// Try numeric comparison first
+			leftNum, rightNum, err := tryNumericComparison(left, right)
+			if err == nil {
+				// Both values are numeric, compare them as float64
+				return leftNum == rightNum, nil
+			}
+			// Fall back to direct comparison
 			return left == right, nil
 		case "!=":
+			// Try numeric comparison first
+			leftNum, rightNum, err := tryNumericComparison(left, right)
+			if err == nil {
+				// Both values are numeric, compare them as float64
+				return leftNum != rightNum, nil
+			}
+			// Fall back to direct comparison
 			return left != right, nil
 		case ">":
 			shouldReturn, result, err := greaterThanComparison(left, right)
@@ -312,6 +357,10 @@ func (e *Evaluator) Evaluate(expr ast.Expression, row []interface{}, columns []d
 				return result, err
 			}
 			return false, nil
+		case "AND":
+			return left.(bool) && right.(bool), nil
+		case "OR":
+			return left.(bool) || right.(bool), nil
 		default:
 			return nil, fmt.Errorf("unsupported operator: %s", expr.Op)
 		}
@@ -464,4 +513,47 @@ func convertTokenTypeToColumnType(tokenType TokenType) (database.ColumnType, err
 	}
 
 	return 0, fmt.Errorf("unsupported token type: %s", tokenType)
+}
+
+// convertToNumeric converts two values to float64 for arithmetic operations
+func convertToNumeric(left, right interface{}) (float64, float64, error) {
+	var leftNum, rightNum float64
+
+	switch l := left.(type) {
+	case int:
+		leftNum = float64(l)
+	case int32:
+		leftNum = float64(l)
+	case int64:
+		leftNum = float64(l)
+	case float32:
+		leftNum = float64(l)
+	case float64:
+		leftNum = l
+	default:
+		return 0, 0, fmt.Errorf("left operand is not a number: %v (%T)", left, left)
+	}
+
+	switch r := right.(type) {
+	case int:
+		rightNum = float64(r)
+	case int32:
+		rightNum = float64(r)
+	case int64:
+		rightNum = float64(r)
+	case float32:
+		rightNum = float64(r)
+	case float64:
+		rightNum = r
+	default:
+		return 0, 0, fmt.Errorf("right operand is not a number: %v (%T)", right, right)
+	}
+
+	return leftNum, rightNum, nil
+}
+
+// tryNumericComparison attempts to convert two values to float64 for comparison
+// If either value is not a number, it returns an error
+func tryNumericComparison(left, right interface{}) (float64, float64, error) {
+	return convertToNumeric(left, right)
 }

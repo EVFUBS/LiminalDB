@@ -19,6 +19,7 @@ const CurrentVersion uint16 = 1
 
 const (
 	DatabaseDir   = "db"
+	TableDir      = "db/tables"
 	FileExtension = ".bin"
 )
 

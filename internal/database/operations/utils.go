@@ -8,7 +8,7 @@ import (
 
 // getIndexFilePath returns the file path for an index
 func getIndexFilePath(tableName string, indexName string) string {
-	return database.DatabaseDir + "/" + tableName + "_" + indexName + ".idx"
+	return database.TableDir + "/" + tableName + "_" + indexName + ".idx"
 }
 
 // extractIndexKeyFromRow extracts the key for an index from a row

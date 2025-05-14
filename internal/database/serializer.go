@@ -27,7 +27,7 @@ import (
 // Serialized rows
 
 func GetTableFilePath(filename string) string {
-	return DatabaseDir + "/" + filename + FileExtension
+	return TableDir + "/" + filename + FileExtension
 }
 
 type Serializer interface {
@@ -506,8 +506,8 @@ func (b BinarySerializer) WriteTableToFile(table *Table, filename string) error 
 		return err
 	}
 
-	if _, err := os.Stat(DatabaseDir); os.IsNotExist(err) {
-		err = os.Mkdir(DatabaseDir, os.ModePerm)
+	if _, err := os.Stat(TableDir); os.IsNotExist(err) {
+		err = os.MkdirAll(TableDir, os.ModePerm)
 		if err != nil {
 			return err
 		}
@@ -584,7 +584,7 @@ func (b BinarySerializer) ReadIndexFromFile(filename string) (*indexing.Index, e
 }
 
 func (b BinarySerializer) ListTables() ([]string, error) {
-	files, err := os.ReadDir(DatabaseDir)
+	files, err := os.ReadDir(TableDir)
 	if err != nil {
 		return nil, err
 	}

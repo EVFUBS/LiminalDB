@@ -1,3 +1,2 @@
 # Project Guidelines
-- Don't use comments, favour self-explanatory code
-- 
+- Don't use comments

@@ -54,8 +54,14 @@ func (l *Lexer) NextToken() Token {
 		tok = newToken(COMMA, l.ch)
 	case '+':
 		tok = newToken(PLUS, l.ch)
+	case '-':
+		tok = newToken(MINUS, l.ch)
 	case '*':
-		tok = newToken(ALL, l.ch)
+		// In SQL, '*' can be either ALL (in SELECT statements) or MULTIPLY (in expressions)
+		// We'll default to MULTIPLY and let the parser handle the context
+		tok = newToken(MULTIPLY, l.ch)
+	case '/':
+		tok = newToken(DIVIDE, l.ch)
 	case '\'':
 		tok.Type = STRING
 		tok.Literal = l.readString()
@@ -155,7 +161,7 @@ const (
 	STRING = "STRING" // "foo bar"
 	FLOAT  = "FLOAT"  // 123.456
 	BOOL   = "BOOL"   // true, false
-	ALL    = "*"
+	ALL    = "ALL"    // For SELECT * queries
 
 	// Types
 	INTTYPE    = "INT"
@@ -164,8 +170,11 @@ const (
 	STRINGTYPE = "STRING"
 
 	// Operators
-	ASSIGN = "="
-	PLUS   = "+"
+	ASSIGN   = "="
+	PLUS     = "+"
+	MINUS    = "-"
+	MULTIPLY = "*"
+	DIVIDE   = "/"
 
 	// Comparison Operators
 	LESS_THAN          = "<"
@@ -202,6 +211,8 @@ const (
 	UNIQUE     = "UNIQUE"
 	SHOW       = "SHOW"
 	INDEXES    = "INDEXES"
+	AND        = "AND"
+	OR         = "OR"
 
 	// Stored Procedure Keywords
 	PROCEDURE = "PROCEDURE"
@@ -235,7 +246,7 @@ var keywords = map[string]TokenType{
 	"not":        NOT,
 	"delete":     DELETE,
 	"desc":       DESC,
-	"*":          ALL,
+	"*":          MULTIPLY,
 	"primary":    PRIMARY,
 	"key":        KEY,
 	"foreign":    FOREIGN,
@@ -252,10 +263,15 @@ var keywords = map[string]TokenType{
 	"end":        END,
 	"exec":       EXEC,
 	"variable":   VARIABLE,
+	"+":          PLUS,
+	"-":          MINUS,
+	"/":          DIVIDE,
 	"<":          LESS_THAN,
 	"<=":         LESS_THAN_OR_EQ,
 	">":          GREATER_THAN,
 	">=":         GREATER_THAN_OR_EQ,
+	"and":        AND,
+	"or":         OR,
 }
 
 func LookupIdent(ident string) TokenType {
