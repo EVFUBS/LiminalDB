@@ -40,7 +40,7 @@ func (o *OperationsImpl) ReadMetadata(filename string) (database.TableMetadata, 
 	return table.Metadata, nil
 }
 
-func (o *OperationsImpl) ReadRows(tableName string, fields []string, filter func([]interface{}, []database.Column) (bool, error), where ast.Expression) (*database.QueryResult, error) {
+func (o *OperationsImpl) ReadRows(tableName string, columns []string, filter func([]interface{}, []database.Column) (bool, error), where ast.Expression) (*database.QueryResult, error) {
 	logger.Debug("Reading rows from table: %s", tableName)
 
 	table, err := o.Serializer.ReadTableFromFile(tableName)
@@ -49,8 +49,10 @@ func (o *OperationsImpl) ReadRows(tableName string, fields []string, filter func
 		return &database.QueryResult{}, err
 	}
 
+	filteredColumns := filterColumns(columns, table.Metadata.Columns)
+
 	result := &database.QueryResult{
-		Columns: table.Metadata.Columns,
+		Columns: filteredColumns,
 	}
 
 	indexInfo, indexKey := o.findBestIndex(table, filter, where)
@@ -64,7 +66,7 @@ func (o *OperationsImpl) ReadRows(tableName string, fields []string, filter func
 			result, err = o.findRowsByIndex(&IndexQuery{
 				Table:         table,
 				TableName:     tableName,
-				Fields:        fields,
+				Fields:        columns,
 				Result:        result,
 				Filter:        filter,
 				Index:         index,
@@ -84,10 +86,10 @@ func (o *OperationsImpl) ReadRows(tableName string, fields []string, filter func
 
 	logger.Debug("Performing full table scan on table %s", tableName)
 	for _, row := range table.Data {
-		selectedRow, err := o.selectRowColumns(row, fields, table, filter)
+		selectedRow, err := o.selectRowColumns(row, columns, table, filter)
 
 		if err != nil {
-			logger.Error("Failed to select row fields from table %s: %v", tableName, err)
+			logger.Error("Failed to select row columns from table %s: %v", tableName, err)
 			return nil, err
 		}
 
@@ -184,4 +186,23 @@ func buildColumnMap(columns []database.Column) map[string]int {
 		columnMap[strings.ToLower(col.Name)] = i
 	}
 	return columnMap
+}
+
+func filterColumns(columns []string, tableColumns []database.Column) []database.Column {
+	if isWildcard(columns) {
+		return tableColumns
+	}
+
+	columnMap := make(map[string]struct{})
+	for _, field := range columns {
+		columnMap[strings.ToLower(field)] = struct{}{}
+	}
+
+	var filteredColumns []database.Column
+	for _, col := range tableColumns {
+		if _, ok := columnMap[strings.ToLower(col.Name)]; ok {
+			filteredColumns = append(filteredColumns, col)
+		}
+	}
+	return filteredColumns
 }

@@ -1,4 +1,4 @@
-package integration
+package tests
 
 import (
 	"LiminalDb/internal/database"
@@ -230,10 +230,29 @@ func TestComplexQuery(t *testing.T) {
 		t.Fatalf("Failed to execute complex SELECT query 1: %v", err1)
 	}
 
-	expected1 := []map[string]any{
-		{"name": "Bob", "salary": int64(80000)},
-		{"name": "Eve", "salary": int64(90000)},
+	expected1 := &database.QueryResult{
+		Columns: []database.Column{
+			{
+				Name:         "name",
+				DataType:     database.TypeString,
+				Length:       100,
+				IsNullable:   true,
+				IsPrimaryKey: false,
+			},
+			{
+				Name:         "salary",
+				DataType:     database.TypeInteger64,
+				Length:       0,
+				IsNullable:   true,
+				IsPrimaryKey: false,
+			},
+		},
+		Rows: [][]any{
+			{"Bob", int64(80000)},
+			{"Eve", int64(90000)},
+		},
 	}
+
 	assertSelectResult(t, result1, expected1, "Query 1")
 
 	// Test 2: Select all from HR or Marketing
@@ -242,9 +261,26 @@ func TestComplexQuery(t *testing.T) {
 	if err2 != nil {
 		t.Fatalf("Failed to execute complex SELECT query 2: %v", err2)
 	}
-	expected2 := []map[string]any{
-		{"name": "Charlie", "department": "HR"},
-		{"name": "David", "department": "Marketing"},
+	expected2 := &database.QueryResult{
+		Columns: []database.Column{
+			{
+				Name:         "name",
+				DataType:     database.TypeString,
+				Length:       100,
+				IsNullable:   true,
+				IsPrimaryKey: false,
+			},
+			{
+				Name:       "department",
+				DataType:   database.TypeString,
+				Length:     50,
+				IsNullable: true,
+			},
+		},
+		Rows: [][]any{
+			{"Charlie", "HR"},
+			{"David", "Marketing"},
+		},
 	}
 	assertSelectResult(t, result2, expected2, "Query 2")
 
@@ -260,69 +296,94 @@ func TestComplexQuery(t *testing.T) {
 	if err3 != nil {
 		t.Logf("SELECT after delete HR failed as expected or returned no results: %v", err3)
 	} else {
-		assertSelectResult(t, result3, []map[string]any{}, "Query 3 (Post HR Deletion)")
+		assertSelectResult(t, result3, &database.QueryResult{
+			Columns: []database.Column{
+				{
+					Name:         "name",
+					DataType:     database.TypeString,
+					Length:       100,
+					IsNullable:   true,
+					IsPrimaryKey: false,
+				},
+			},
+		}, "Query 3 (Post HR Deletion)")
 	}
 
 }
 
+func TestSproc(t *testing.T) {
+	defer cleanupDB(t)
+	_, err := execute("CREATE TABLE users (id int primary key, name string(100), active bool)")
+	if err != nil {
+		t.Fatalf("Failed to create table for sproc test: %v", err)
+	}
+
+	_, err = execute("INSERT INTO users (id, name, active) VALUES (1, 'Alice', true)")
+	if err != nil {
+		t.Fatalf("Failed to insert row for sproc test: %v", err)
+	}
+
+	_, err = execute("CREATE PROCEDURE get_user_by_id(@id int) AS BEGIN SELECT name, active FROM users WHERE id = @id; END")
+	if err != nil {
+		t.Fatalf("Failed to create sproc: %v", err)
+	}
+
+	result, err := execute("EXEC get_user_by_id(1)")
+	if err != nil {
+		t.Fatalf("Failed to execute sproc: %v", err)
+	}
+
+	expected := &database.QueryResult{
+		Columns: []database.Column{
+			{
+				Name:         "name",
+				DataType:     database.TypeString,
+				Length:       100,
+				IsNullable:   true,
+				IsPrimaryKey: false,
+			},
+			{
+				Name:       "active",
+				DataType:   database.TypeBoolean,
+				Length:     0,
+				IsNullable: true,
+			},
+		},
+		Rows: [][]any{
+			{"Alice", true},
+		},
+	}
+
+	assertSelectResult(t, result, expected, "Sproc Result")
+}
+
 // assertSelectResult is a helper to reduce boilerplate in SELECT tests
-func assertSelectResult(t *testing.T, actualResult any, expectedResult []map[string]any, queryName string) {
-	t.Helper() // Marks this function as a test helper
-	actualSlice, ok := actualResult.([]map[string]any)
+func assertSelectResult(t *testing.T, actualResult any, expected *database.QueryResult, queryName string) {
+	t.Helper()
+	actual, ok := actualResult.(*database.QueryResult)
 	if !ok {
-		t.Fatalf("%s: SELECT result is not of expected type []map[string]any, got %T", queryName, actualResult)
+		t.Fatalf("%s: Result is not of type *database.QueryResult, got %T", queryName, actualResult)
 	}
 
-	// Normalize int types for comparison (e.g., int vs int64)
-	normalizedActual := make([]map[string]any, len(actualSlice))
-	for i, row := range actualSlice {
-		normalizedActual[i] = make(map[string]any)
-		for k, v := range row {
-			if num, isNum := v.(int); isNum {
-				normalizedActual[i][k] = int64(num)
-			} else if num, isNum := v.(int32); isNum {
-				normalizedActual[i][k] = int64(num)
-			} else {
-				normalizedActual[i][k] = v
-			}
-		}
-	}
-
-	if len(normalizedActual) != len(expectedResult) {
-		t.Errorf("%s: Result length mismatch. Expected %d rows, got %d rows. Expected %v, got %v", queryName, len(expectedResult), len(normalizedActual), expectedResult, normalizedActual)
+	// Compare columns
+	if !reflect.DeepEqual(actual.Columns, expected.Columns) {
+		t.Errorf("%s: Column definitions mismatch.\nExpected: %+v\nGot: %+v",
+			queryName, expected.Columns, actual.Columns)
 		return
 	}
 
-	// For more robust comparison, consider sorting or comparing sets if row order is not guaranteed
-	// This simple DeepEqual works if order is guaranteed and types match exactly.
-	// Adding a check for individual rows to provide more detailed error messages
-	for i := range expectedResult {
-		found := false
-		for j := range normalizedActual {
-			if reflect.DeepEqual(expectedResult[i], normalizedActual[j]) {
-				found = true
-				// Optionally, remove found items from normalizedActual to handle duplicates correctly if needed,
-				// but that makes the logic more complex if order doesn't matter.
-				// For now, we assume this simple check is okay if counts match.
-				break
-			}
-		}
-		if !found {
-			t.Errorf("%s: Expected row %v not found in actual results %v", queryName, expectedResult[i], normalizedActual)
-		}
+	// Compare number of rows
+	if len(actual.Rows) != len(expected.Rows) {
+		t.Errorf("%s: Row count mismatch. Expected %d rows, got %d rows",
+			queryName, len(expected.Rows), len(actual.Rows))
+		return
 	}
 
-	// Double check the other way
-	for i := range normalizedActual {
-		found := false
-		for j := range expectedResult {
-			if reflect.DeepEqual(normalizedActual[i], expectedResult[j]) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("%s: Actual row %v not found in expected results %v", queryName, normalizedActual[i], expectedResult)
+	// Compare rows in order
+	for i := range expected.Rows {
+		if !reflect.DeepEqual(actual.Rows[i], expected.Rows[i]) {
+			t.Errorf("%s: Row %d mismatch.\nExpected: %v\nGot: %v",
+				queryName, i, expected.Rows[i], actual.Rows[i])
 		}
 	}
 }
