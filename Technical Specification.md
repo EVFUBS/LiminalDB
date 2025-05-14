@@ -4,18 +4,6 @@ This document outlines the current state, implemented features, and planned futu
 
 ## Current Technologies
 
-### Programming Languages and Frameworks
--   **Go (Golang)**: The primary programming language for LiminalDB's implementation.
--   **Standard Go Libraries**: Used for core functionality, including:
-  -   `bytes`: Buffer manipulation.
-  -   `encoding/binary`: Binary data serialization.
-  -   `errors`: Error handling mechanisms.
-  -   `io`: Input/Output operations.
-  -   `os`: File system interactions.
-  -   `strings`: String manipulation utilities.
-  -   `sync`: Concurrency control using mutexes.
-  -   `time`: Handling timestamps and time-related operations.
-
 ### Database Systems and Technologies
 -   **Custom File Format**: A proprietary binary file format identified by a magic number and version.
 -   **B-Tree Indexing**: Utilized for efficient data storage and retrieval.
@@ -194,6 +182,7 @@ Features for handling larger datasets and ensuring continuous operation:
 -   [x] Basic error handling and logging
 
 ### Foundational Next Steps
+-   [ ] Test Suite (In Progress)
 -   [ ] Foreign key constraint enhancement (In Progress)
 -   [ ] Data Types Expansion
   -   [ ] NUMERIC(p,s)
@@ -232,6 +221,7 @@ Features for handling larger datasets and ensuring continuous operation:
   -   [ ] Spatial indexes
   -   [ ] Multi-column indexes
   -   [ ] Index-only scans
+  -   [ ] Clustered/Non Clustered
 -   [ ] Query Language
   -   [ ] JOIN operations
   -   [ ] Subqueries
@@ -246,4 +236,4 @@ Features for handling larger datasets and ensuring continuous operation:
   -   [ ] Two-phase commit
 -   [ ] Views & Materialized Views
 -   [ ] Database Security
--   [ ] Scalability & Availability (Partitioning, Replication/HA)
+-   [ ] Scalability & Availability (Partitioning, Replication)
