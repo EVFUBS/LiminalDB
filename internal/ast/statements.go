@@ -1,6 +1,8 @@
 package ast
 
-import "LiminalDb/internal/database"
+import (
+	"LiminalDb/internal/database"
+)
 
 type Statement interface{}
 
@@ -14,6 +16,12 @@ type InsertStatement struct {
 	TableName  string
 	Columns    []string
 	ValueLists [][]Expression
+}
+
+type UpdateStatement struct {
+	TableName string
+	Values    []Expression
+	Where     Expression
 }
 
 type CreateTableStatement struct {

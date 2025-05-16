@@ -48,3 +48,12 @@ func (o *OperationsImpl) GetColumnIndex(table *database.Table, columnName string
 	}
 	return -1, fmt.Errorf("column %s not found in table %s", columnName, table.Metadata.Name)
 }
+
+func (o *OperationsImpl) GetPrimaryKeyIndexFromMetadata(table *database.Table) (int, error) {
+	for idx, col := range table.Metadata.Columns {
+		if col.IsPrimaryKey {
+			return idx, nil
+		}
+	}
+	return -1, fmt.Errorf("no primary key found in table %s", table.Metadata.Name)
+}

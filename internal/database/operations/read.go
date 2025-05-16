@@ -40,7 +40,7 @@ func (o *OperationsImpl) ReadMetadata(filename string) (database.TableMetadata, 
 	return table.Metadata, nil
 }
 
-func (o *OperationsImpl) ReadRows(tableName string, columns []string, filter func([]interface{}, []database.Column) (bool, error), where ast.Expression) (*database.QueryResult, error) {
+func (o *OperationsImpl) ReadRows(tableName string, columns []string, filter Filter, where ast.Expression) (*database.QueryResult, error) {
 	logger.Debug("Reading rows from table: %s", tableName)
 
 	table, err := o.Serializer.ReadTableFromFile(tableName)
@@ -49,30 +49,75 @@ func (o *OperationsImpl) ReadRows(tableName string, columns []string, filter fun
 		return &database.QueryResult{}, err
 	}
 
-	filteredColumns := filterColumns(columns, table.Metadata.Columns)
+	result := BuildResultWithFilteredColumns(columns, table.Metadata.Columns)
 
-	result := &database.QueryResult{
-		Columns: filteredColumns,
+	result, err = o.ReadRowsUsingIndex(&IndexQuery{
+		Table:         table,
+		TableName:     tableName,
+		Fields:        columns,
+		Result:        result,
+		Filter:        filter,
+		Index:         nil,
+		IndexMetaData: nil,
+		IndexKey:      nil,
+	}, where)
+
+	if err != nil {
+		logger.Error("Failed to read rows using index: %v", err)
+		return nil, err
 	}
 
-	indexInfo, indexKey := o.findBestIndex(table, filter, where)
-	if indexInfo != nil && indexKey != nil {
-		logger.Debug("Using index %s for query on table %s", indexInfo.Name, tableName)
+	if result.Rows != nil {
+		return result, nil
+	}
 
-		index, err := o.loadIndex(tableName, indexInfo.Name)
+	logger.Debug("No suitable index found for query on table %s", tableName)
+
+	result, err = o.ReadRowsFullScan(table, columns, filter, result)
+	if err != nil {
+		logger.Error("Failed to perform full table scan: %v", err)
+		return nil, err
+	}
+
+	logger.Debug("Successfully read %d rows from table %s", len(result.Rows), tableName)
+	return result, nil
+}
+
+func (o *OperationsImpl) ReadRowsFullScan(table *database.Table, columns []string, filter Filter, result *database.QueryResult) (*database.QueryResult, error) {
+	logger.Debug("Reading rows from table: %s", table.Metadata.Name)
+	logger.Debug("Performing full table scan on table %s", table.Metadata.Name)
+	for _, row := range table.Data {
+		selectedRow, err := o.ReadRowFilterWithRequestedColumns(row, columns, table, filter)
+
+		if err != nil {
+			logger.Error("Failed to select row columns from table %s: %v", table.Metadata.Name, err)
+			return nil, err
+		}
+
+		if selectedRow == nil {
+			continue
+		}
+
+		result.Rows = append(result.Rows, selectedRow)
+	}
+
+	return result, nil
+}
+
+func (o *OperationsImpl) ReadRowsUsingIndex(indexQuery *IndexQuery, where ast.Expression) (*database.QueryResult, error) {
+	logger.Debug("Finding best index for query on table %s", indexQuery.TableName)
+	indexInfo, indexKey := o.findBestIndexColumn(indexQuery.Table, where)
+
+	if indexInfo != nil && indexKey != nil {
+		index, err := o.loadIndex(indexQuery.TableName, indexInfo.Name)
 		if err != nil {
 			logger.Error("Failed to load index %s: %v", indexInfo.Name, err)
 		} else {
-			result, err = o.findRowsByIndex(&IndexQuery{
-				Table:         table,
-				TableName:     tableName,
-				Fields:        columns,
-				Result:        result,
-				Filter:        filter,
-				Index:         index,
-				IndexMetaData: indexInfo,
-				IndexKey:      indexKey,
-			})
+			indexQuery.Index = index
+			indexQuery.IndexMetaData = indexInfo
+			indexQuery.IndexKey = indexKey
+
+			result, err := o.findRowsByIndex(indexQuery)
 
 			if err != nil {
 				logger.Error("Failed to find rows using index %s: %v", indexInfo.Name, err)
@@ -84,24 +129,7 @@ func (o *OperationsImpl) ReadRows(tableName string, columns []string, filter fun
 		}
 	}
 
-	logger.Debug("Performing full table scan on table %s", tableName)
-	for _, row := range table.Data {
-		selectedRow, err := o.selectRowColumns(row, columns, table, filter)
-
-		if err != nil {
-			logger.Error("Failed to select row columns from table %s: %v", tableName, err)
-			return nil, err
-		}
-
-		if selectedRow == nil {
-			continue
-		}
-
-		result.Rows = append(result.Rows, selectedRow)
-	}
-
-	logger.Debug("Successfully read %d rows from table %s", len(result.Rows), tableName)
-	return result, nil
+	return nil, nil
 }
 
 func (o *OperationsImpl) findRowsByIndex(indexQuery *IndexQuery) (*database.QueryResult, error) {
@@ -126,7 +154,7 @@ func (o *OperationsImpl) findRowsByIndex(indexQuery *IndexQuery) (*database.Quer
 				}
 			}
 
-			selectedRow, err := o.selectRowColumns(row, indexQuery.Fields, indexQuery.Table, nil)
+			selectedRow, err := o.ReadRowFilterWithRequestedColumns(row, indexQuery.Fields, indexQuery.Table, nil)
 			if err != nil {
 				logger.Error("Failed to select row fields: %v", err)
 				return nil, err
@@ -145,7 +173,7 @@ func (o *OperationsImpl) findRowsByIndex(indexQuery *IndexQuery) (*database.Quer
 	return nil, nil
 }
 
-func (o *OperationsImpl) selectRowColumns(row []any, columns []string, table *database.Table, filter func([]any, []database.Column) (bool, error)) ([]any, error) {
+func (o *OperationsImpl) ReadRowFilterWithRequestedColumns(row []any, columns []string, table *database.Table, filter func([]any, []database.Column) (bool, error)) ([]any, error) {
 	if filter != nil {
 		matches, err := filter(row, table.Metadata.Columns)
 		if err != nil {
@@ -188,9 +216,11 @@ func buildColumnMap(columns []database.Column) map[string]int {
 	return columnMap
 }
 
-func filterColumns(columns []string, tableColumns []database.Column) []database.Column {
+func BuildResultWithFilteredColumns(columns []string, tableColumns []database.Column) *database.QueryResult {
 	if isWildcard(columns) {
-		return tableColumns
+		return &database.QueryResult{
+			Columns: tableColumns,
+		}
 	}
 
 	columnMap := make(map[string]struct{})
@@ -204,5 +234,10 @@ func filterColumns(columns []string, tableColumns []database.Column) []database.
 			filteredColumns = append(filteredColumns, col)
 		}
 	}
-	return filteredColumns
+
+	result := &database.QueryResult{
+		Columns: filteredColumns,
+	}
+
+	return result
 }

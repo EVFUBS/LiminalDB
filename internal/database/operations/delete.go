@@ -8,7 +8,7 @@ import (
 	"os"
 )
 
-func (o *OperationsImpl) DeleteRows(tableName string, filter func([]interface{}, []database.Column) (bool, error)) (int64, error) {
+func (o *OperationsImpl) DeleteRows(tableName string, filter Filter) (int64, error) {
 	logger.Info("Deleting rows from table: %s", tableName)
 
 	table, err := o.Serializer.ReadTableFromFile(tableName)

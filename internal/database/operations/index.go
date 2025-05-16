@@ -2,6 +2,7 @@ package operations
 
 import (
 	"LiminalDb/internal/ast"
+	"LiminalDb/internal/common"
 	"LiminalDb/internal/database"
 	"LiminalDb/internal/database/indexing"
 	"LiminalDb/internal/logger"
@@ -9,92 +10,40 @@ import (
 	"os"
 )
 
-func (o *OperationsImpl) findBestIndex(table *database.Table, _ func([]interface{}, []database.Column) (bool, error), where ast.Expression) (*database.IndexMetadata, interface{}) {
+type candidateIndex struct {
+	index *database.IndexMetadata
+	key   interface{}
+}
+
+func (o *OperationsImpl) findBestIndexColumn(table *database.Table, where ast.Expression) (*database.IndexMetadata, interface{}) {
 	if where == nil {
 		return nil, nil
 	}
 
-	type candidateIndex struct {
-		index *database.IndexMetadata
-		key   interface{}
+	colNameFromFilter, valFromFilter, foundEquality := extractAssignment(where)
+	if !foundEquality {
+		return nil, nil
 	}
+
 	var candidates []candidateIndex
+	for i := range table.Metadata.Indexes {
+		idx := &table.Metadata.Indexes[i]
 
-	var extractEqualityParts func(expr ast.Expression) (colName string, val interface{}, found bool)
-	extractEqualityParts = func(expr ast.Expression) (string, interface{}, bool) {
-
-		binExpr, ok := expr.(*ast.WhereExpression)
-		if !ok {
-			return "", nil, false
-		}
-
-		if binExpr.Op != "=" { // <-- ### ADAPT THIS CONDITION ###
-			return "", nil, false
-		}
-
-		var columnName string
-		var value interface{}
-		foundColumnValue := false
-
-		if leftIdent, okL := binExpr.Left.(*ast.Identifier); okL {
-			if rightLit, okR := binExpr.Right.(*ast.Literal); okR {
-				columnName = leftIdent.Value
-				value = rightLit.Value
-				foundColumnValue = true
-			}
-		}
-
-		if !foundColumnValue {
-			if rightIdent, okR := binExpr.Right.(*ast.Identifier); okR {
-				if leftLit, okL := binExpr.Left.(*ast.Literal); okL {
-					columnName = rightIdent.Value
-					value = leftLit.Value
-					foundColumnValue = true
-				}
-			}
-		}
-
-		if foundColumnValue {
-			return columnName, value, true
-		}
-
-		return "", nil, false
-	}
-
-	colNameFromFilter, valFromFilter, foundEquality := extractEqualityParts(where)
-
-	if foundEquality {
-		for i := range table.Metadata.Indexes {
-			idx := &table.Metadata.Indexes[i]
-
-			if len(idx.Columns) == 1 && idx.Columns[0] == colNameFromFilter {
-				candidates = append(candidates, candidateIndex{index: idx, key: valFromFilter})
-			}
-			// TODO: Extend to support composite indexes. This would involve checking if the 'where'
-			// clause provides values for the leading columns of a composite index.
+		// Only consider single-column indexes that match the equality condition.
+		// TODO: Extend to support composite indexes. This would involve checking if the 'where'
+		// clause provides values for the leading columns of a composite index.
+		if len(idx.Columns) == 1 && idx.Columns[0] == colNameFromFilter {
+			candidates = append(candidates, candidateIndex{index: idx, key: valFromFilter})
 		}
 	}
 
 	if len(candidates) == 0 {
-		return nil, nil // No suitable index found that matches the 'where' clause structure
+		return nil, nil
 	}
 
-	var bestCandidate *candidateIndex
-
-	for i := range candidates {
-		if candidates[i].index.IsPrimary {
-			bestCandidate = &candidates[i]
-			break
-		}
-	}
-
+	bestCandidate := findPrimaryIndex(candidates)
 	if bestCandidate == nil {
-		for i := range candidates {
-			if candidates[i].index.IsUnique {
-				bestCandidate = &candidates[i]
-				break
-			}
-		}
+		bestCandidate = findUniqueIndex(candidates)
 	}
 
 	if bestCandidate == nil && len(candidates) > 0 {
@@ -106,6 +55,74 @@ func (o *OperationsImpl) findBestIndex(table *database.Table, _ func([]interface
 	}
 
 	return nil, nil
+}
+
+func extractAssignments(where ast.Expression) (assignments map[string]any) {
+	if where == nil {
+		return nil
+	}
+
+	assignments = make(map[string]any)
+
+	switch expr := where.(type) {
+	case *ast.AssignmentExpression:
+		if colName, val, found := extractAssignment(expr); found {
+			assignments[colName] = val
+		}
+	case *ast.BinaryExpression:
+		if common.LogicalOperators[expr.Op] {
+			leftAssignments := extractAssignments(expr.Left)
+			rightAssignments := extractAssignments(expr.Right)
+
+			for k, v := range leftAssignments {
+				assignments[k] = v
+			}
+			for k, v := range rightAssignments {
+				assignments[k] = v
+			}
+		}
+	}
+
+	return assignments
+}
+
+func extractAssignment(expr ast.Expression) (colName string, val interface{}, found bool) {
+	binExpr, ok := expr.(*ast.AssignmentExpression)
+	if !ok || binExpr.Op != "=" {
+		return "", nil, false
+	}
+
+	if leftIdent, okL := binExpr.Left.(*ast.Identifier); okL {
+		if rightLit, okR := binExpr.Right.(ast.Expression); okR {
+			return leftIdent.Value, rightLit.GetValue(), true
+		}
+	}
+
+	if rightIdent, okR := binExpr.Right.(*ast.Identifier); okR {
+		if leftLit, okL := binExpr.Left.(ast.Expression); okL {
+			return rightIdent.Value, leftLit.GetValue(), true
+		}
+	}
+
+	return "", nil, false
+}
+
+func findPrimaryIndex(candidates []candidateIndex) *candidateIndex {
+	for i := range candidates {
+		if candidates[i].index.IsPrimary {
+			return &candidates[i]
+		}
+	}
+	return nil
+}
+
+func findUniqueIndex(candidates []candidateIndex) *candidateIndex {
+	for i := range candidates {
+		if candidates[i].index.IsUnique {
+			return &candidates[i]
+		}
+	}
+	return nil
 }
 
 func (o *OperationsImpl) CreateIndex(tableName string, indexName string, columns []string, isUnique bool) error {

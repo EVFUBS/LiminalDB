@@ -2,6 +2,7 @@ package interpreter
 
 import (
 	"LiminalDb/internal/ast"
+	. "LiminalDb/internal/common"
 	"LiminalDb/internal/database"
 	"fmt"
 	"strconv"
@@ -40,6 +41,8 @@ func (p *Parser) ParseStatement() (ast.Statement, error) {
 		return p.parseCreateStatement()
 	case DELETE:
 		return p.parseDeleteStatement()
+	case UPDATE:
+		return p.parseUpdateStatement()
 	case DROP:
 		return p.parseDropStatement()
 	case DESC:
@@ -122,6 +125,36 @@ func (p *Parser) parseInsertStatement() (*ast.InsertStatement, error) {
 
 	p.nextToken()
 	stmt.ValueLists = p.parseValueLists()
+
+	return stmt, nil
+}
+
+func (p *Parser) parseUpdateStatement() (ast.Statement, error) {
+	stmt := &ast.UpdateStatement{}
+
+	if !p.expectPeek(IDENT) {
+		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
+	}
+
+	stmt.TableName = p.curToken.Literal
+
+	if !p.expectPeek(SET) {
+		return nil, fmt.Errorf("expected set, got %s", p.curToken.Literal)
+	}
+
+	stmt.Values = p.parseValueListWithoutBrackets()
+
+	if !p.expectPeek(WHERE) {
+		return nil, fmt.Errorf("expected where, got %s", p.curToken.Literal)
+	}
+
+	p.nextToken()
+
+	stmt.Where = p.parseExpression()
+
+	if !p.expectPeek(SEMICOLON) && !p.expectPeek(EOF) {
+		return nil, fmt.Errorf("expected semicolon or eof, got %s", p.curToken.Literal)
+	}
 
 	return stmt, nil
 }
@@ -670,7 +703,7 @@ func (p *Parser) parseVariable() ast.Expression {
 }
 
 func (p *Parser) parseAssignment() ast.Expression {
-	expr := &ast.WhereExpression{
+	expr := &ast.AssignmentExpression{
 		Left: p.parseIdentifier(),
 	}
 
@@ -707,7 +740,7 @@ func (p *Parser) parseComparisonExpression(left ast.Expression) ast.Expression {
 	p.nextToken()
 	right := p.parseExpressionWithPrecedence(precedence)
 
-	return &ast.WhereExpression{
+	return &ast.AssignmentExpression{
 		Left:  left,
 		Op:    operator,
 		Right: right,
@@ -721,7 +754,7 @@ func (p *Parser) parseLogicalExpression(left ast.Expression) ast.Expression {
 	p.nextToken()
 	right := p.parseExpressionWithPrecedence(precedence)
 
-	return &ast.WhereExpression{
+	return &ast.AssignmentExpression{
 		Left:  left,
 		Op:    operator,
 		Right: right,
@@ -753,11 +786,22 @@ func (p *Parser) parseValueLists() [][]ast.Expression {
 }
 
 func (p *Parser) parseValueList() []ast.Expression {
-	values := []ast.Expression{}
-
+	// TODO: Possible bug here with expectPeek since it moves the token forward
 	if !p.curTokenIs(LPAREN) && !p.expectPeek(LPAREN) {
 		return nil
 	}
+
+	values := p.parseValueListWithoutBrackets()
+
+	if !p.expectPeek(RPAREN) {
+		return nil
+	}
+
+	return values
+}
+
+func (p *Parser) parseValueListWithoutBrackets() []ast.Expression {
+	values := []ast.Expression{}
 
 	p.nextToken()
 
@@ -773,10 +817,6 @@ func (p *Parser) parseValueList() []ast.Expression {
 		if value != nil {
 			values = append(values, value)
 		}
-	}
-
-	if !p.expectPeek(RPAREN) {
-		return nil
 	}
 
 	return values

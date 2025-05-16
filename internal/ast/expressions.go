@@ -1,17 +1,16 @@
 package ast
 
-// Expressions
 type Expression interface {
 	GetValue() interface{}
 }
 
-type WhereExpression struct {
+type AssignmentExpression struct {
 	Left  Expression
 	Right Expression
 	Op    string
 }
 
-func (w *WhereExpression) GetValue() interface{} {
+func (w *AssignmentExpression) GetValue() interface{} {
 	return w.Right.GetValue()
 }
 
@@ -28,6 +27,14 @@ type Identifier struct {
 
 func (i *Identifier) GetValue() interface{} {
 	return i.Value
+}
+
+type Literal struct {
+	Value any
+}
+
+func (l *Literal) GetValue() interface{} {
+	return l.Value
 }
 
 type StringLiteral struct {
@@ -60,14 +67,6 @@ type BooleanLiteral struct {
 
 func (b *BooleanLiteral) GetValue() interface{} {
 	return b.Value
-}
-
-type Literal struct {
-	Value interface{}
-}
-
-func (l *Literal) GetValue() interface{} {
-	return l.Value
 }
 
 type VariableExpression struct {

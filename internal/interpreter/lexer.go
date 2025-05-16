@@ -1,6 +1,9 @@
 package interpreter
 
-import "strings"
+import (
+	. "LiminalDb/internal/common"
+	"strings"
+)
 
 type Lexer struct {
 	input        string
@@ -151,81 +154,6 @@ type Token struct {
 	Literal string
 }
 
-const (
-	ILLEGAL = "ILLEGAL"
-	EOF     = "EOF"
-
-	// Identifiers + literals
-	IDENT  = "IDENT"  // add, foobar, x, y, ...
-	INT    = "INT"    // 1343456
-	STRING = "STRING" // "foo bar"
-	FLOAT  = "FLOAT"  // 123.456
-	BOOL   = "BOOL"   // true, false
-	ALL    = "ALL"    // For SELECT * queries
-
-	// Types
-	INTTYPE    = "INT"
-	FLOATTYPE  = "FLOAT"
-	BOOLTYPE   = "BOOL"
-	STRINGTYPE = "STRING"
-
-	// Operators
-	ASSIGN   = "="
-	PLUS     = "+"
-	MINUS    = "-"
-	MULTIPLY = "*"
-	DIVIDE   = "/"
-
-	// Comparison Operators
-	LESS_THAN          = "<"
-	LESS_THAN_OR_EQ    = "<="
-	GREATER_THAN       = ">"
-	GREATER_THAN_OR_EQ = ">="
-
-	// Delimiters
-	COMMA     = ","
-	SEMICOLON = ";"
-	LPAREN    = "("
-	RPAREN    = ")"
-
-	// Keywords
-	SELECT     = "SELECT"
-	FROM       = "FROM"
-	WHERE      = "WHERE"
-	INSERT     = "INSERT"
-	INTO       = "INTO"
-	VALUES     = "VALUES"
-	CREATE     = "CREATE"
-	TABLE      = "TABLE"
-	DROP       = "DROP"
-	NULL       = "NULL"
-	NOT        = "NOT"
-	DELETE     = "DELETE"
-	DESC       = "DESC"
-	PRIMARY    = "PRIMARY"
-	KEY        = "KEY"
-	FOREIGN    = "FOREIGN"
-	REFERENCES = "REFERENCES"
-	ON         = "ON"
-	INDEX      = "INDEX"
-	UNIQUE     = "UNIQUE"
-	SHOW       = "SHOW"
-	INDEXES    = "INDEXES"
-	AND        = "AND"
-	OR         = "OR"
-
-	// Stored Procedure Keywords
-	PROCEDURE = "PROCEDURE"
-	ALTER     = "ALTER"
-	AS        = "AS"
-	BEGIN     = "BEGIN"
-	END       = "END"
-	EXEC      = "EXEC"
-
-	// Variables
-	VARIABLE = "@" // For variables like @user_id
-)
-
 var keywords = map[string]TokenType{
 	"select":     SELECT,
 	"from":       FROM,
@@ -238,6 +166,8 @@ var keywords = map[string]TokenType{
 	"create":     CREATE,
 	"table":      TABLE,
 	"drop":       DROP,
+	"update":     UPDATE,
+	"set":        SET,
 	"int":        INTTYPE,
 	"float":      FLOATTYPE,
 	"bool":       BOOLTYPE,

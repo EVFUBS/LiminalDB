@@ -2,6 +2,7 @@ package interpreter
 
 import (
 	"LiminalDb/internal/ast"
+	. "LiminalDb/internal/common"
 	"LiminalDb/internal/database"
 	"LiminalDb/internal/database/operations"
 	"LiminalDb/internal/logger"
@@ -55,6 +56,8 @@ func (e *Evaluator) executeStatement(stmt ast.Statement) (interface{}, error) {
 		return e.executeInsert(stmt)
 	case *ast.CreateTableStatement:
 		return e.executeCreateTable(stmt)
+	case *ast.UpdateStatement:
+		return e.executeUpdate(stmt)
 	case *ast.DeleteStatement:
 		return e.executeDelete(stmt)
 	case *ast.DropTableStatement:
@@ -305,7 +308,7 @@ func (e *Evaluator) Evaluate(expr ast.Expression, row []interface{}, columns []d
 		default:
 			return nil, fmt.Errorf("unsupported binary operator: %s", expr.Op)
 		}
-	case *ast.WhereExpression:
+	case *ast.AssignmentExpression:
 		left, err := e.Evaluate(expr.Left, row, columns)
 		if err != nil {
 			return nil, err
@@ -370,18 +373,7 @@ func (e *Evaluator) Evaluate(expr ast.Expression, row []interface{}, columns []d
 }
 
 func (e *Evaluator) selectData(tableName string, fields []string, where ast.Expression) (*database.QueryResult, error) {
-	filter := func(row []interface{}, columns []database.Column) (bool, error) {
-		if where == nil {
-			return true, nil
-		}
-		matches, err := e.Evaluate(where, row, columns)
-		if err != nil {
-			return false, err
-		}
-		return matches.(bool), nil
-	}
-
-	return e.operations.ReadRows(tableName, fields, filter, where)
+	return e.operations.ReadRows(tableName, fields, e.filter(where), where)
 }
 
 func (e *Evaluator) insertData(tableName string, fields []string, values [][]ast.Expression) (interface{}, error) {
@@ -404,6 +396,21 @@ func (e *Evaluator) insertData(tableName string, fields []string, values [][]ast
 	}
 
 	return "Insert successful", nil
+}
+
+func (e *Evaluator) executeUpdate(stmt *ast.UpdateStatement) (any, error) {
+	data, err := buildUpdateData(stmt.Values)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build update data: %w", err)
+	}
+
+	logger.Debug("Executing UPDATE statement on table: %s", stmt.TableName)
+	err = e.operations.UpdateRows(stmt.TableName, data, e.filter(stmt.Where))
+	if err != nil {
+		return nil, fmt.Errorf("failed to update table: %w", err)
+	}
+
+	return "Update successful", nil
 }
 
 func (e *Evaluator) createTable(tableName string, columns []database.Column) (interface{}, error) {
@@ -498,6 +505,33 @@ func (e *Evaluator) executeShowIndexes(stmt *ast.ShowIndexesStatement) (interfac
 
 	logger.Debug("SHOW INDEXES statement executed successfully")
 	return indexes, nil
+}
+
+func (e *Evaluator) filter(where ast.Expression) func(row []interface{}, columns []database.Column) (bool, error) {
+	return func(row []interface{}, columns []database.Column) (bool, error) {
+		if where == nil {
+			return true, nil
+		}
+
+		matches, err := e.Evaluate(where, row, columns)
+		if err != nil {
+			return false, err
+		}
+		return matches.(bool), nil
+	}
+}
+
+func buildUpdateData(values []ast.Expression) (map[string]any, error) {
+	data := make(map[string]any)
+	for _, value := range values {
+		valueExpression := value.(*ast.AssignmentExpression)
+		if valueExpression.Op != ASSIGN {
+			return nil, fmt.Errorf("unsupported operator: %s", valueExpression.Op)
+		}
+		data[valueExpression.Left.(*ast.Identifier).Value] = valueExpression.Right.GetValue()
+	}
+
+	return data, nil
 }
 
 func convertTokenTypeToColumnType(tokenType TokenType) (database.ColumnType, error) {
