@@ -42,17 +42,14 @@ type Serializer interface {
 type BinarySerializer struct {
 }
 
-// writeData is a helper method to write data to a buffer using binary.Write
 func (b BinarySerializer) writeData(buf *bytes.Buffer, data interface{}) error {
 	return binary.Write(buf, binary.LittleEndian, data)
 }
 
-// readData is a helper method to read data from a reader using binary.Read
 func (b BinarySerializer) readData(buf *bytes.Reader, data interface{}) error {
 	return binary.Read(buf, binary.LittleEndian, data)
 }
 
-// writeString writes a string with its length prefix to a buffer
 func (b BinarySerializer) writeString(buf *bytes.Buffer, s string) error {
 	strBytes := []byte(s)
 	if err := b.writeData(buf, uint16(len(strBytes))); err != nil {
@@ -61,7 +58,6 @@ func (b BinarySerializer) writeString(buf *bytes.Buffer, s string) error {
 	return b.writeData(buf, strBytes)
 }
 
-// readString reads a length-prefixed string from a reader
 func (b BinarySerializer) readString(buf *bytes.Reader) (string, error) {
 	var length uint16
 	if err := b.readData(buf, &length); err != nil {
@@ -119,24 +115,19 @@ func (b BinarySerializer) DeserializeHeader(buf *bytes.Reader) (FileHeader, erro
 func (b BinarySerializer) SerializeMetadata(metadata TableMetadata) ([]byte, uint32, error) {
 	buf := new(bytes.Buffer)
 
-	// Write table name
 	if err := b.writeString(buf, metadata.Name); err != nil {
 		return nil, 0, err
 	}
 
-	// Write column count
 	if err := b.writeData(buf, metadata.ColumnCount); err != nil {
 		return nil, 0, err
 	}
 
-	// Write columns
 	for _, col := range metadata.Columns {
-		// Write column name
 		if err := b.writeString(buf, col.Name); err != nil {
 			return nil, 0, err
 		}
 
-		// Write column properties
 		if err := b.writeData(buf, col.DataType); err != nil {
 			return nil, 0, err
 		}
@@ -154,7 +145,6 @@ func (b BinarySerializer) SerializeMetadata(metadata TableMetadata) ([]byte, uin
 		}
 	}
 
-	// Write row count and data offset
 	if err := b.writeData(buf, metadata.RowCount); err != nil {
 		return nil, 0, err
 	}
@@ -163,13 +153,30 @@ func (b BinarySerializer) SerializeMetadata(metadata TableMetadata) ([]byte, uin
 		return nil, 0, err
 	}
 
-	// Serialize foreign keys (placeholder for future implementation)
 	if err := b.writeData(buf, int64(len(metadata.ForeignKeys))); err != nil {
 		return nil, 0, err
 	}
-	// We're not actually serializing foreign keys yet, just writing the count
 
-	// Serialize indexes
+	for _, foreignKey := range metadata.ForeignKeys {
+		if err := b.writeString(buf, foreignKey.ReferencedTable); err != nil {
+			return nil, 0, err
+		}
+
+		if err := b.writeData(buf, int64(len(foreignKey.ReferencedColumns))); err != nil {
+			return nil, 0, err
+		}
+
+		for _, referencedColumn := range foreignKey.ReferencedColumns {
+			if err := b.writeString(buf, referencedColumn.ColumnName); err != nil {
+				return nil, 0, err
+			}
+
+			if err := b.writeString(buf, referencedColumn.ReferencedColumnName); err != nil {
+				return nil, 0, err
+			}
+		}
+	}
+
 	indexCount := int64(0)
 	if metadata.Indexes != nil {
 		indexCount = int64(len(metadata.Indexes))
@@ -179,14 +186,11 @@ func (b BinarySerializer) SerializeMetadata(metadata TableMetadata) ([]byte, uin
 		return nil, 0, err
 	}
 
-	// Write indexes
 	for _, idx := range metadata.Indexes {
-		// Write index name
 		if err := b.writeString(buf, idx.Name); err != nil {
 			return nil, 0, err
 		}
 
-		// Write columns count and names
 		if err := b.writeData(buf, int64(len(idx.Columns))); err != nil {
 			return nil, 0, err
 		}
@@ -197,7 +201,6 @@ func (b BinarySerializer) SerializeMetadata(metadata TableMetadata) ([]byte, uin
 			}
 		}
 
-		// Write flags
 		if err := b.writeData(buf, idx.IsUnique); err != nil {
 			return nil, 0, err
 		}
@@ -213,29 +216,24 @@ func (b BinarySerializer) SerializeMetadata(metadata TableMetadata) ([]byte, uin
 func (b BinarySerializer) DeserializeMetadata(buf *bytes.Reader) (TableMetadata, error) {
 	var metadata TableMetadata
 
-	// Read table name
 	tableName, err := b.readString(buf)
 	if err != nil {
 		return TableMetadata{}, err
 	}
 	metadata.Name = tableName
 
-	// Read column count
 	if err := b.readData(buf, &metadata.ColumnCount); err != nil {
 		return TableMetadata{}, err
 	}
 
-	// Read columns
 	metadata.Columns = make([]Column, metadata.ColumnCount)
 	for i := range metadata.Columns {
-		// Read column name
 		colName, err := b.readString(buf)
 		if err != nil {
 			return TableMetadata{}, err
 		}
 		metadata.Columns[i].Name = colName
 
-		// Read column properties
 		if err := b.readData(buf, &metadata.Columns[i].DataType); err != nil {
 			return TableMetadata{}, err
 		}
@@ -253,7 +251,6 @@ func (b BinarySerializer) DeserializeMetadata(buf *bytes.Reader) (TableMetadata,
 		}
 	}
 
-	// Read row count and data offset
 	if err := b.readData(buf, &metadata.RowCount); err != nil {
 		return TableMetadata{}, err
 	}
@@ -262,34 +259,50 @@ func (b BinarySerializer) DeserializeMetadata(buf *bytes.Reader) (TableMetadata,
 		return TableMetadata{}, err
 	}
 
-	// Deserialize foreign keys (placeholder for future implementation)
 	var foreignKeyCount int64
 	if err := b.readData(buf, &foreignKeyCount); err != nil {
-		// If we can't read foreign key count, it might be an old file format
-		// Just return what we have so far
 		return metadata, nil
 	}
-	// We're not actually deserializing foreign keys yet, just reading the count
 
-	// Deserialize indexes
+	metadata.ForeignKeys = make([]ForeignKeyConstraint, foreignKeyCount)
+	for i := range metadata.ForeignKeys {
+		metadata.ForeignKeys[i].ReferencedTable, err = b.readString(buf)
+		if err != nil {
+			return TableMetadata{}, err
+		}
+
+		var referencedColumnCount int64
+		if err := b.readData(buf, &referencedColumnCount); err != nil {
+			return TableMetadata{}, err
+		}
+
+		metadata.ForeignKeys[i].ReferencedColumns = make([]ForeignKeyReference, referencedColumnCount)
+		for j := range metadata.ForeignKeys[i].ReferencedColumns {
+			metadata.ForeignKeys[i].ReferencedColumns[j].ColumnName, err = b.readString(buf)
+			if err != nil {
+				return TableMetadata{}, err
+			}
+
+			metadata.ForeignKeys[i].ReferencedColumns[j].ReferencedColumnName, err = b.readString(buf)
+			if err != nil {
+				return TableMetadata{}, err
+			}
+		}
+	}
+
 	var indexCount int64
 	if err := b.readData(buf, &indexCount); err != nil {
-		// If we can't read index count, it might be an old file format
-		// Just return what we have so far
 		return metadata, nil
 	}
 
-	// Read indexes
 	metadata.Indexes = make([]IndexMetadata, indexCount)
 	for i := range metadata.Indexes {
-		// Read index name
 		idxName, err := b.readString(buf)
 		if err != nil {
 			return TableMetadata{}, err
 		}
 		metadata.Indexes[i].Name = idxName
 
-		// Read columns count and names
 		var columnCount int64
 		if err := b.readData(buf, &columnCount); err != nil {
 			return TableMetadata{}, err
@@ -304,7 +317,6 @@ func (b BinarySerializer) DeserializeMetadata(buf *bytes.Reader) (TableMetadata,
 			metadata.Indexes[i].Columns[j] = colName
 		}
 
-		// Read flags
 		if err := b.readData(buf, &metadata.Indexes[i].IsUnique); err != nil {
 			return TableMetadata{}, err
 		}
@@ -317,7 +329,6 @@ func (b BinarySerializer) DeserializeMetadata(buf *bytes.Reader) (TableMetadata,
 	return metadata, nil
 }
 
-// serializeValue serializes a single value based on its column definition
 func (b BinarySerializer) serializeValue(buf *bytes.Buffer, val interface{}, col Column) error {
 	switch v := val.(type) {
 	case int64:

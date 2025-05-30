@@ -51,7 +51,7 @@ func (o *OperationsImpl) ReadRows(tableName string, columns []string, filter Fil
 
 	result := BuildResultWithFilteredColumns(columns, table.Metadata.Columns)
 
-	result, err = o.ReadRowsUsingIndex(&IndexQuery{
+	indexResult, err := o.ReadRowsUsingIndex(&IndexQuery{
 		Table:         table,
 		TableName:     tableName,
 		Fields:        columns,
@@ -67,8 +67,8 @@ func (o *OperationsImpl) ReadRows(tableName string, columns []string, filter Fil
 		return nil, err
 	}
 
-	if result.Rows != nil {
-		return result, nil
+	if indexResult != nil {
+		return indexResult, nil
 	}
 
 	logger.Debug("No suitable index found for query on table %s", tableName)

@@ -229,7 +229,50 @@ func (p *Parser) parseCreateTableStatement() (*ast.CreateTableStatement, error) 
 		return nil, fmt.Errorf("expected left parenthesis, got %s", p.curToken.Literal)
 	}
 
-	stmt.Columns = p.parseColumnDefinitions()
+	columns, err := p.parseColumnDefinitions()
+
+	if err != nil {
+		return nil, err
+	}
+
+	stmt.Columns = columns
+
+	if p.peekTokenIs(FOREIGN) {
+		p.nextToken()
+		if !p.expectPeek(KEY) {
+			return nil, fmt.Errorf("expected key, got %s", p.curToken.Literal)
+		}
+
+		p.nextToken()
+		p.nextToken()
+
+		columns := p.parseIdentifierList()
+		p.nextToken()
+
+		if !p.expectPeek(REFERENCES) {
+			return nil, fmt.Errorf("expected references, got %s", p.curToken.Literal)
+		}
+		p.nextToken()
+
+		referencedTable := p.curToken.Literal
+
+		if !p.expectPeek(LPAREN) {
+			return nil, fmt.Errorf("expected left parenthesis, got %s", p.curToken.Literal)
+		}
+
+		p.nextToken()
+		referencedColumns := p.parseIdentifierList()
+
+		stmt.ForeignKeys = append(stmt.ForeignKeys, database.ForeignKeyConstraint{
+			ReferencedTable: referencedTable,
+			ReferencedColumns: []database.ForeignKeyReference{
+				{
+					ColumnName:           columns[0],
+					ReferencedColumnName: referencedColumns[0],
+				},
+			},
+		})
+	}
 
 	if !p.expectPeek(RPAREN) {
 		return nil, fmt.Errorf("expected right parenthesis, got %s", p.curToken.Literal)
@@ -346,10 +389,14 @@ func (p *Parser) parseDescribeTableStatement() (*ast.DescribeTableStatement, err
 }
 
 func (p *Parser) parseAlterStatement() (ast.Statement, error) {
-	if !p.expectPeek(PROCEDURE) {
-		return nil, fmt.Errorf("expected procedure, got %s", p.curToken.Literal)
+	switch p.curToken.Type {
+	case PROCEDURE:
+		return p.parseAlterProcedureStatement()
+	// case TABLE:
+	// 	return p.parseAlterTableStatement()
+	default:
+		return nil, fmt.Errorf("expected procedure or table, got %s", p.curToken.Literal)
 	}
-	return p.parseAlterProcedureStatement()
 }
 
 func (p *Parser) parseCreateProcedureStatement() (*ast.CreateProcedureStatement, error) {
@@ -362,7 +409,13 @@ func (p *Parser) parseCreateProcedureStatement() (*ast.CreateProcedureStatement,
 
 	if p.peekTokenIs(LPAREN) {
 		p.nextToken()
-		stmt.Parameters = p.parseColumnDefinitions()
+
+		parameters, err := p.parseColumnDefinitions()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Parameters = parameters
+
 		if !p.expectPeek(RPAREN) {
 			return nil, fmt.Errorf("expected right parenthesis, got %s", p.curToken.Literal)
 		}
@@ -377,6 +430,25 @@ func (p *Parser) parseCreateProcedureStatement() (*ast.CreateProcedureStatement,
 	return stmt, nil
 }
 
+// func (p *Parser) parseAlterTableStatement() (*ast.AlterTableStatement, error) {
+// 	stmt := &ast.AlterTableStatement{}
+
+// 	if !p.expectPeek(IDENT) {
+// 		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
+// 	}
+// 	stmt.TableName = p.curToken.Literal
+
+// 	if p.peekTokenIs(DROP) {
+
+// 		if !p.expectPeek(CONSTRAINT) {
+
+// 		}
+
+// 	}
+
+// 	return stmt, nil
+// }
+
 func (p *Parser) parseAlterProcedureStatement() (*ast.AlterProcedureStatement, error) {
 	stmt := &ast.AlterProcedureStatement{}
 
@@ -388,7 +460,13 @@ func (p *Parser) parseAlterProcedureStatement() (*ast.AlterProcedureStatement, e
 	if p.peekTokenIs(LPAREN) {
 		p.nextToken()
 		p.nextToken()
-		stmt.Parameters = p.parseColumnDefinitions()
+
+		parameters, err := p.parseColumnDefinitions()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Parameters = parameters
+
 		if !p.expectPeek(RPAREN) {
 			return nil, fmt.Errorf("expected right parenthesis, got %s", p.curToken.Literal)
 		}
@@ -433,17 +511,17 @@ func (p *Parser) parseProcedureBody() (string, bool, error) {
 	return bodyBuilder.String(), true, nil
 }
 
-func (p *Parser) parseColumnDefinitions() []database.Column {
+func (p *Parser) parseColumnDefinitions() ([]database.Column, error) {
 	columns := []database.Column{}
 
 	if !p.expectPeek(IDENT) && !p.expectPeek(VARIABLE) {
-		return nil
+		return nil, fmt.Errorf("expected identifier or variable, got %s", p.curToken.Literal)
 	}
 
 	for {
 		col := p.parseColumnDefinition()
 		if col == nil {
-			return nil
+			return nil, fmt.Errorf("expected column definition, got %s", p.curToken.Literal)
 		}
 		columns = append(columns, *col)
 
@@ -453,11 +531,15 @@ func (p *Parser) parseColumnDefinitions() []database.Column {
 
 		p.nextToken()
 		if !p.expectPeek(IDENT) {
-			return nil
+			if p.peekTokenIs(FOREIGN) {
+				break
+			}
+
+			return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
 		}
 	}
 
-	return columns
+	return columns, nil
 }
 
 func (p *Parser) parseColumnDefinition() *database.Column {

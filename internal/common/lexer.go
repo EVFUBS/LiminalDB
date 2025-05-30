@@ -64,6 +64,8 @@ const (
 	INDEXES    = "INDEXES"
 	AND        = "AND"
 	OR         = "OR"
+	CONSTRAINT = "CONSTRAINT"
+	ADD        = "ADD"
 
 	// Stored Procedure Keywords
 	PROCEDURE = "PROCEDURE"

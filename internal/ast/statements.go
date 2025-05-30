@@ -25,8 +25,9 @@ type UpdateStatement struct {
 }
 
 type CreateTableStatement struct {
-	TableName string
-	Columns   []database.Column
+	TableName   string
+	Columns     []database.Column
+	ForeignKeys []database.ForeignKeyConstraint
 }
 
 type DeleteStatement struct {
@@ -75,4 +76,16 @@ type AlterProcedureStatement struct {
 type ExecStatement struct {
 	Name       string
 	Parameters []Expression
+}
+
+type AlterTableStatement struct {
+	TableName      string
+	Columns        []database.Column
+	ForeignKeys    []database.ForeignKeyConstraint
+	DropConstraint bool
+	AddConstraint  bool
+	DropColumn     bool
+	AddColumn      bool
+	DropIndex      bool
+	AddIndex       bool
 }

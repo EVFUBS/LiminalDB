@@ -111,7 +111,7 @@ func (e *Evaluator) executeInsert(stmt *ast.InsertStatement) (interface{}, error
 func (e *Evaluator) executeCreateTable(stmt *ast.CreateTableStatement) (interface{}, error) {
 	logger.Debug("Executing CREATE TABLE statement for table: %s", stmt.TableName)
 
-	data, err := e.createTable(stmt.TableName, stmt.Columns)
+	data, err := e.createTable(stmt)
 	if err != nil {
 		logger.Error("Failed to execute CREATE TABLE statement: %v", err)
 		return nil, err
@@ -413,10 +413,11 @@ func (e *Evaluator) executeUpdate(stmt *ast.UpdateStatement) (any, error) {
 	return "Update successful", nil
 }
 
-func (e *Evaluator) createTable(tableName string, columns []database.Column) (interface{}, error) {
+func (e *Evaluator) createTable(stmt *ast.CreateTableStatement) (interface{}, error) {
 	metadata := database.TableMetadata{
-		Name:    tableName,
-		Columns: columns,
+		Name:        stmt.TableName,
+		Columns:     stmt.Columns,
+		ForeignKeys: stmt.ForeignKeys,
 	}
 
 	err := e.operations.CreateTable(metadata)

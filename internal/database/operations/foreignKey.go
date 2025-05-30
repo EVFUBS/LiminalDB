@@ -6,7 +6,6 @@ import (
 	"fmt"
 )
 
-// TODO: can already see this implementation being crap for performance so circle back to this
 func (o *OperationsImpl) writeForeignKeyCheck(table *database.Table, newRow []interface{}) error {
 	for _, foreignKey := range table.Metadata.ForeignKeys {
 

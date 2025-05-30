@@ -31,7 +31,7 @@ func TestCreateTable(t *testing.T) {
 		t.Fatalf("Failed to execute CREATE TABLE: %v", err)
 	}
 
-	tablePath := filepath.Join("./db", "users"+database.FileExtension)
+	tablePath := filepath.Join("./db/tables", "users"+database.FileExtension)
 	if _, err := os.Stat(tablePath); os.IsNotExist(err) {
 		t.Errorf("Table file was not created at %s", tablePath)
 	}
@@ -141,7 +141,7 @@ func TestDropTable(t *testing.T) {
 		t.Fatalf("Failed to create table for drop table test: %v", err)
 	}
 
-	tablePath := filepath.Join("./db", "temp_table"+database.FileExtension)
+	tablePath := filepath.Join("./db/tables", "temp_table"+database.FileExtension)
 	if _, err := os.Stat(tablePath); os.IsNotExist(err) {
 		t.Fatalf("Table file was not created at %s before drop", tablePath)
 	}
@@ -355,6 +355,34 @@ func TestSproc(t *testing.T) {
 	}
 
 	assertSelectResult(t, result, expected, "Sproc Result")
+}
+
+func TestForeignKey(t *testing.T) {
+	defer cleanupDB(t)
+	_, err := execute("CREATE TABLE customers (cid int primary key, name string(100))")
+	if err != nil {
+		t.Fatalf("Failed to create customers table: %v", err)
+	}
+
+	_, err = execute("CREATE TABLE orders (oid int primary key, customer_id int, FOREIGN KEY (customer_id) REFERENCES customers(cid))")
+	if err != nil {
+		t.Fatalf("Failed to create orders table with foreign key: %v", err)
+	}
+
+	_, err = execute("INSERT INTO customers (cid, name) VALUES (1, 'John Doe')")
+	if err != nil {
+		t.Fatalf("Failed to insert customer: %v", err)
+	}
+
+	_, err = execute("INSERT INTO orders (oid, customer_id) VALUES (1, 1)")
+	if err != nil {
+		t.Fatalf("Failed to insert order with valid foreign key: %v", err)
+	}
+
+	_, err = execute("INSERT INTO orders (oid, customer_id) VALUES (2, 999)")
+	if err == nil {
+		t.Errorf("Expected error when inserting order with invalid foreign key, got nil")
+	}
 }
 
 // assertSelectResult is a helper to reduce boilerplate in SELECT tests
