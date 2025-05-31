@@ -264,6 +264,7 @@ func (p *Parser) parseCreateTableStatement() (*ast.CreateTableStatement, error) 
 		referencedColumns := p.parseIdentifierList()
 
 		stmt.ForeignKeys = append(stmt.ForeignKeys, database.ForeignKeyConstraint{
+			Name:            fmt.Sprintf("FK_%s_%s", stmt.TableName, columns[0]),
 			ReferencedTable: referencedTable,
 			ReferencedColumns: []database.ForeignKeyReference{
 				{
@@ -389,11 +390,12 @@ func (p *Parser) parseDescribeTableStatement() (*ast.DescribeTableStatement, err
 }
 
 func (p *Parser) parseAlterStatement() (ast.Statement, error) {
+	p.nextToken()
 	switch p.curToken.Type {
 	case PROCEDURE:
 		return p.parseAlterProcedureStatement()
-	// case TABLE:
-	// 	return p.parseAlterTableStatement()
+	case TABLE:
+		return p.parseAlterTableStatement()
 	default:
 		return nil, fmt.Errorf("expected procedure or table, got %s", p.curToken.Literal)
 	}
@@ -430,24 +432,34 @@ func (p *Parser) parseCreateProcedureStatement() (*ast.CreateProcedureStatement,
 	return stmt, nil
 }
 
-// func (p *Parser) parseAlterTableStatement() (*ast.AlterTableStatement, error) {
-// 	stmt := &ast.AlterTableStatement{}
+func (p *Parser) parseAlterTableStatement() (*ast.AlterTableStatement, error) {
+	stmt := &ast.AlterTableStatement{}
 
-// 	if !p.expectPeek(IDENT) {
-// 		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
-// 	}
-// 	stmt.TableName = p.curToken.Literal
+	if !p.expectPeek(IDENT) {
+		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
+	}
+	stmt.TableName = p.curToken.Literal
 
-// 	if p.peekTokenIs(DROP) {
+	if p.peekTokenIs(DROP) {
+		p.nextToken()
+		stmt.DropConstraint = true
+		if !p.expectPeek(CONSTRAINT) {
+			return nil, fmt.Errorf("expected constraint, got %s", p.curToken.Literal)
+		}
 
-// 		if !p.expectPeek(CONSTRAINT) {
+		if !p.expectPeek(IDENT) {
+			return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
+		}
 
-// 		}
+		stmt.ConstraintName = p.curToken.Literal
+	} else {
+		return nil, fmt.Errorf("expected drop constraint, (as its the only supported operation at the moment) got %s", p.curToken.Literal)
+	}
 
-// 	}
+	// TODO: Support more than drop constraint
 
-// 	return stmt, nil
-// }
+	return stmt, nil
+}
 
 func (p *Parser) parseAlterProcedureStatement() (*ast.AlterProcedureStatement, error) {
 	stmt := &ast.AlterProcedureStatement{}

@@ -202,6 +202,7 @@ var keywords = map[string]TokenType{
 	">=":         GREATER_THAN_OR_EQ,
 	"and":        AND,
 	"or":         OR,
+	"constraint": CONSTRAINT,
 }
 
 func LookupIdent(ident string) TokenType {

@@ -21,7 +21,7 @@ func (o *OperationsImpl) DeleteRows(tableName string, filter Filter) (int64, err
 		return 0, err
 	}
 
-	err = o.DeleteRowForeignKeyCheck(table, rowsToDelete)
+	err = o.deleteRowForeignKeyCheck(table, rowsToDelete)
 	if err != nil {
 		return 0, err
 	}

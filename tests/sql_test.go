@@ -135,7 +135,7 @@ func TestDropRow(t *testing.T) {
 }
 
 func TestDropTable(t *testing.T) {
-	defer cleanupDB(t) // Ensure cleanup even if table creation fails for some reason
+	defer cleanupDB(t)
 	_, err := execute("CREATE TABLE temp_table (id int primary key)")
 	if err != nil {
 		t.Fatalf("Failed to create table for drop table test: %v", err)
@@ -164,8 +164,6 @@ func TestSelectNonExistentTable(t *testing.T) {
 	if err == nil {
 		t.Errorf("Expected error when selecting from non-existent table, but got nil")
 	}
-	// Add more specific error checking if your interpreter returns typed errors
-	// For example: if !strings.Contains(err.Error(), "table not found") { ... }
 }
 
 func TestInsertIntoNonExistentTable(t *testing.T) {
@@ -255,7 +253,6 @@ func TestComplexQuery(t *testing.T) {
 
 	assertSelectResult(t, result1, expected1, "Query 1")
 
-	// Test 2: Select all from HR or Marketing
 	selectSQL2 := "SELECT name, department FROM employees WHERE department = 'HR' OR department = 'Marketing'"
 	result2, err2 := execute(selectSQL2)
 	if err2 != nil {
@@ -284,13 +281,11 @@ func TestComplexQuery(t *testing.T) {
 	}
 	assertSelectResult(t, result2, expected2, "Query 2")
 
-	// Test 3: Delete HR department
 	_, err = execute("DELETE FROM employees WHERE department = 'HR'")
 	if err != nil {
 		t.Fatalf("Failed to delete HR department: %v", err)
 	}
 
-	// Verify deletion
 	selectSQL3 := "SELECT name FROM employees WHERE department = 'HR'"
 	result3, err3 := execute(selectSQL3)
 	if err3 != nil {
@@ -385,7 +380,29 @@ func TestForeignKey(t *testing.T) {
 	}
 }
 
-// assertSelectResult is a helper to reduce boilerplate in SELECT tests
+func TestDropForeignKey(t *testing.T) {
+	defer cleanupDB(t)
+	_, err := execute("CREATE TABLE customers (cid int primary key, name string(100))")
+	if err != nil {
+		t.Fatalf("Failed to create customers table: %v", err)
+	}
+
+	_, err = execute("CREATE TABLE orders (oid int primary key, customer_id int, FOREIGN KEY (customer_id) REFERENCES customers(cid))")
+	if err != nil {
+		t.Fatalf("Failed to create orders table with foreign key: %v", err)
+	}
+
+	_, err = execute("ALTER TABLE orders DROP CONSTRAINT FK_orders_customer_id")
+	if err != nil {
+		t.Fatalf("Failed to drop foreign key: %v", err)
+	}
+
+	_, err = execute("INSERT INTO orders (oid, customer_id) VALUES (3, 1)")
+	if err != nil {
+		t.Errorf("Expected success when inserting order after dropping foreign key, got error: %v", err)
+	}
+}
+
 func assertSelectResult(t *testing.T, actualResult any, expected *database.QueryResult, queryName string) {
 	t.Helper()
 	actual, ok := actualResult.(*database.QueryResult)
@@ -393,21 +410,18 @@ func assertSelectResult(t *testing.T, actualResult any, expected *database.Query
 		t.Fatalf("%s: Result is not of type *database.QueryResult, got %T", queryName, actualResult)
 	}
 
-	// Compare columns
 	if !reflect.DeepEqual(actual.Columns, expected.Columns) {
 		t.Errorf("%s: Column definitions mismatch.\nExpected: %+v\nGot: %+v",
 			queryName, expected.Columns, actual.Columns)
 		return
 	}
 
-	// Compare number of rows
 	if len(actual.Rows) != len(expected.Rows) {
 		t.Errorf("%s: Row count mismatch. Expected %d rows, got %d rows",
 			queryName, len(expected.Rows), len(actual.Rows))
 		return
 	}
 
-	// Compare rows in order
 	for i := range expected.Rows {
 		if !reflect.DeepEqual(actual.Rows[i], expected.Rows[i]) {
 			t.Errorf("%s: Row %d mismatch.\nExpected: %v\nGot: %v",

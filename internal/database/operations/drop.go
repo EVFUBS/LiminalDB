@@ -38,3 +38,27 @@ func (o *OperationsImpl) DropTable(tableName string) error {
 	logger.Info("Table %s dropped successfully", tableName)
 	return nil
 }
+
+func (o *OperationsImpl) DropConstraint(tableName string, constraintName string) error {
+	logger.Info("Dropping constraint: %s", constraintName)
+
+	table, err := o.Serializer.ReadTableFromFile(tableName)
+	if err != nil {
+		logger.Error("Failed to read table %s: %v", tableName, err)
+		return err
+	}
+
+	for i := len(table.Metadata.ForeignKeys) - 1; i >= 0; i-- {
+		if table.Metadata.ForeignKeys[i].Name == constraintName {
+			table.Metadata.ForeignKeys = append(table.Metadata.ForeignKeys[:i], table.Metadata.ForeignKeys[i+1:]...)
+		}
+	}
+
+	if err := o.Serializer.WriteTableToFile(table, tableName); err != nil {
+		logger.Error("Failed to save table after dropping constraint: %v", err)
+		return err
+	}
+
+	logger.Info("Constraint %s dropped successfully from table %s", constraintName, tableName)
+	return nil
+}

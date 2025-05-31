@@ -18,6 +18,7 @@ type Operations interface {
 	CreateIndex(tableName string, indexName string, columns []string, isUnique bool) error
 	DropIndex(tableName string, indexName string) error
 	ListIndexes(tableName string) ([]database.IndexMetadata, error)
+	DropConstraint(tableName string, constraintName string) error
 }
 
 type OperationsImpl struct {

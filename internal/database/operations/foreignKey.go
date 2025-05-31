@@ -66,7 +66,7 @@ func (o *OperationsImpl) writeForeignKeyCheck(table *database.Table, newRow []in
 	return nil
 }
 
-func (o *OperationsImpl) DeleteRowForeignKeyCheck(table *database.Table, rowsToDelete []bool) error {
+func (o *OperationsImpl) deleteRowForeignKeyCheck(table *database.Table, rowsToDelete []bool) error {
 	tables, err := o.Serializer.ListTables()
 	if err != nil {
 		return fmt.Errorf("failed to list tables for foreign key check: %w", err)

@@ -158,6 +158,10 @@ func (b BinarySerializer) SerializeMetadata(metadata TableMetadata) ([]byte, uin
 	}
 
 	for _, foreignKey := range metadata.ForeignKeys {
+		if err := b.writeString(buf, foreignKey.Name); err != nil {
+			return nil, 0, err
+		}
+
 		if err := b.writeString(buf, foreignKey.ReferencedTable); err != nil {
 			return nil, 0, err
 		}
@@ -266,6 +270,11 @@ func (b BinarySerializer) DeserializeMetadata(buf *bytes.Reader) (TableMetadata,
 
 	metadata.ForeignKeys = make([]ForeignKeyConstraint, foreignKeyCount)
 	for i := range metadata.ForeignKeys {
+		metadata.ForeignKeys[i].Name, err = b.readString(buf)
+		if err != nil {
+			return TableMetadata{}, err
+		}
+
 		metadata.ForeignKeys[i].ReferencedTable, err = b.readString(buf)
 		if err != nil {
 			return TableMetadata{}, err

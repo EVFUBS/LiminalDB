@@ -62,6 +62,7 @@ type Column struct {
 }
 
 type ForeignKeyConstraint struct {
+	Name              string
 	ReferencedTable   string
 	ReferencedColumns []ForeignKeyReference
 }

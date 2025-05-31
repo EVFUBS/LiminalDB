@@ -82,6 +82,7 @@ type AlterTableStatement struct {
 	TableName      string
 	Columns        []database.Column
 	ForeignKeys    []database.ForeignKeyConstraint
+	ConstraintName string
 	DropConstraint bool
 	AddConstraint  bool
 	DropColumn     bool

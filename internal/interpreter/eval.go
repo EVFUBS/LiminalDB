@@ -76,6 +76,8 @@ func (e *Evaluator) executeStatement(stmt ast.Statement) (interface{}, error) {
 		return e.executeDropIndex(stmt)
 	case *ast.ShowIndexesStatement:
 		return e.executeShowIndexes(stmt)
+	case *ast.AlterTableStatement:
+		return e.executeAlterTable(stmt)
 	default:
 		logger.Error("Unsupported statement type: %T", stmt)
 		return nil, fmt.Errorf("unsupported statement type")
@@ -508,6 +510,20 @@ func (e *Evaluator) executeShowIndexes(stmt *ast.ShowIndexesStatement) (interfac
 	return indexes, nil
 }
 
+func (e *Evaluator) executeAlterTable(stmt *ast.AlterTableStatement) (interface{}, error) {
+	logger.Debug("Executing ALTER TABLE statement for table: %s", stmt.TableName)
+
+	if stmt.DropConstraint {
+		err := e.operations.DropConstraint(stmt.TableName, stmt.ConstraintName)
+		if err != nil {
+			logger.Error("Failed to execute DROP CONSTRAINT statement: %v", err)
+			return nil, fmt.Errorf("failed to drop constraint: %w", err)
+		}
+	}
+
+	return nil, nil
+}
+
 func (e *Evaluator) filter(where ast.Expression) func(row []interface{}, columns []database.Column) (bool, error) {
 	return func(row []interface{}, columns []database.Column) (bool, error) {
 		if where == nil {
@@ -550,7 +566,6 @@ func convertTokenTypeToColumnType(tokenType TokenType) (database.ColumnType, err
 	return 0, fmt.Errorf("unsupported token type: %s", tokenType)
 }
 
-// convertToNumeric converts two values to float64 for arithmetic operations
 func convertToNumeric(left, right interface{}) (float64, float64, error) {
 	var leftNum, rightNum float64
 
