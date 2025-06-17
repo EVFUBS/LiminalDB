@@ -230,7 +230,6 @@ func (p *Parser) parseCreateTableStatement() (*ast.CreateTableStatement, error) 
 	}
 
 	columns, err := p.parseColumnDefinitions()
-
 	if err != nil {
 		return nil, err
 	}
@@ -452,10 +451,14 @@ func (p *Parser) parseAlterTableStatement() (*ast.AlterTableStatement, error) {
 		}
 
 		stmt.ConstraintName = p.curToken.Literal
-	} else {
-		return nil, fmt.Errorf("expected drop constraint, (as its the only supported operation at the moment) got %s", p.curToken.Literal)
 	}
 
+	if p.peekTokenIs(ADD) {
+		p.nextToken()
+		stmt.AddColumn = true
+		columnToAdd := p.parseColumnDefinition()
+		stmt.Columns = append(stmt.Columns, *columnToAdd)
+	}
 	// TODO: Support more than drop constraint
 
 	return stmt, nil
@@ -467,6 +470,7 @@ func (p *Parser) parseAlterProcedureStatement() (*ast.AlterProcedureStatement, e
 	if !p.expectPeek(IDENT) {
 		return nil, fmt.Errorf("expected identifier, got %s", p.curToken.Literal)
 	}
+
 	stmt.Name = p.curToken.Literal
 
 	if p.peekTokenIs(LPAREN) {

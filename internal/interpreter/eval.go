@@ -23,7 +23,7 @@ func NewEvaluator(parser *Parser) *Evaluator {
 	}
 }
 
-func (e *Evaluator) Execute(query string) (interface{}, error) {
+func (e *Evaluator) Execute(query string) (any, error) {
 	logger.Debug("Executing query: %s", query)
 
 	e.parser.lexer = NewLexer(query)
@@ -46,7 +46,7 @@ func (e *Evaluator) Execute(query string) (interface{}, error) {
 	return result, nil
 }
 
-func (e *Evaluator) executeStatement(stmt ast.Statement) (interface{}, error) {
+func (e *Evaluator) executeStatement(stmt ast.Statement) (any, error) {
 	logger.Debug("Executing statement of type: %T", stmt)
 
 	switch stmt := stmt.(type) {
@@ -97,7 +97,7 @@ func (e *Evaluator) executeSelect(stmt *ast.SelectStatement) (*database.QueryRes
 	return data, nil
 }
 
-func (e *Evaluator) executeInsert(stmt *ast.InsertStatement) (interface{}, error) {
+func (e *Evaluator) executeInsert(stmt *ast.InsertStatement) (any, error) {
 	logger.Debug("Executing INSERT statement on table: %s", stmt.TableName)
 
 	data, err := e.insertData(stmt.TableName, stmt.Columns, stmt.ValueLists)
@@ -110,7 +110,7 @@ func (e *Evaluator) executeInsert(stmt *ast.InsertStatement) (interface{}, error
 	return data, nil
 }
 
-func (e *Evaluator) executeCreateTable(stmt *ast.CreateTableStatement) (interface{}, error) {
+func (e *Evaluator) executeCreateTable(stmt *ast.CreateTableStatement) (any, error) {
 	logger.Debug("Executing CREATE TABLE statement for table: %s", stmt.TableName)
 
 	data, err := e.createTable(stmt)
@@ -123,7 +123,7 @@ func (e *Evaluator) executeCreateTable(stmt *ast.CreateTableStatement) (interfac
 	return data, nil
 }
 
-func (e *Evaluator) executeDelete(stmt *ast.DeleteStatement) (interface{}, error) {
+func (e *Evaluator) executeDelete(stmt *ast.DeleteStatement) (any, error) {
 	logger.Debug("Executing DELETE statement on table: %s", stmt.TableName)
 
 	data, err := e.deleteData(stmt.TableName, stmt.Where)
@@ -136,7 +136,7 @@ func (e *Evaluator) executeDelete(stmt *ast.DeleteStatement) (interface{}, error
 	return data, nil
 }
 
-func (e *Evaluator) executeDropTable(stmt *ast.DropTableStatement) (interface{}, error) {
+func (e *Evaluator) executeDropTable(stmt *ast.DropTableStatement) (any, error) {
 	logger.Debug("Executing DROP TABLE statement for table: %s", stmt.TableName)
 
 	data, err := e.dropTable(stmt.TableName)
@@ -415,7 +415,7 @@ func (e *Evaluator) executeUpdate(stmt *ast.UpdateStatement) (any, error) {
 	return "Update successful", nil
 }
 
-func (e *Evaluator) createTable(stmt *ast.CreateTableStatement) (interface{}, error) {
+func (e *Evaluator) createTable(stmt *ast.CreateTableStatement) (any, error) {
 	metadata := database.TableMetadata{
 		Name:        stmt.TableName,
 		Columns:     stmt.Columns,
@@ -430,8 +430,8 @@ func (e *Evaluator) createTable(stmt *ast.CreateTableStatement) (interface{}, er
 	return "Create table successful", nil
 }
 
-func (e *Evaluator) deleteData(tableName string, where ast.Expression) (interface{}, error) {
-	filter := func(row []interface{}, columns []database.Column) (bool, error) {
+func (e *Evaluator) deleteData(tableName string, where ast.Expression) (any, error) {
+	filter := func(row []any, columns []database.Column) (bool, error) {
 		if where == nil {
 			return true, nil
 		}
@@ -453,9 +453,8 @@ func (e *Evaluator) deleteData(tableName string, where ast.Expression) (interfac
 	return fmt.Sprintf("%d row(s) deleted", deletedCount), nil
 }
 
-func (e *Evaluator) dropTable(tableName string) (interface{}, error) {
+func (e *Evaluator) dropTable(tableName string) (any, error) {
 	err := e.operations.DropTable(tableName)
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to drop table: %w", err)
 	}
@@ -463,7 +462,7 @@ func (e *Evaluator) dropTable(tableName string) (interface{}, error) {
 	return "Drop table successful", nil
 }
 
-func (e *Evaluator) describeTable(tableName string) (interface{}, error) {
+func (e *Evaluator) describeTable(tableName string) (any, error) {
 	metadata, err := e.operations.ReadMetadata(tableName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read metadata: %w", err)
@@ -471,7 +470,7 @@ func (e *Evaluator) describeTable(tableName string) (interface{}, error) {
 	return metadata, nil
 }
 
-func (e *Evaluator) executeCreateIndex(stmt *ast.CreateIndexStatement) (interface{}, error) {
+func (e *Evaluator) executeCreateIndex(stmt *ast.CreateIndexStatement) (any, error) {
 	logger.Debug("Executing CREATE INDEX statement for index: %s on table: %s", stmt.IndexName, stmt.TableName)
 
 	err := e.operations.CreateIndex(stmt.TableName, stmt.IndexName, stmt.Columns, stmt.IsUnique)
@@ -484,7 +483,7 @@ func (e *Evaluator) executeCreateIndex(stmt *ast.CreateIndexStatement) (interfac
 	return "Create index successful", nil
 }
 
-func (e *Evaluator) executeDropIndex(stmt *ast.DropIndexStatement) (interface{}, error) {
+func (e *Evaluator) executeDropIndex(stmt *ast.DropIndexStatement) (any, error) {
 	logger.Debug("Executing DROP INDEX statement for index: %s on table: %s", stmt.IndexName, stmt.TableName)
 
 	err := e.operations.DropIndex(stmt.TableName, stmt.IndexName)
@@ -497,7 +496,7 @@ func (e *Evaluator) executeDropIndex(stmt *ast.DropIndexStatement) (interface{},
 	return "Drop index successful", nil
 }
 
-func (e *Evaluator) executeShowIndexes(stmt *ast.ShowIndexesStatement) (interface{}, error) {
+func (e *Evaluator) executeShowIndexes(stmt *ast.ShowIndexesStatement) (any, error) {
 	logger.Debug("Executing SHOW INDEXES statement for table: %s", stmt.TableName)
 
 	indexes, err := e.operations.ListIndexes(stmt.TableName)
@@ -510,7 +509,7 @@ func (e *Evaluator) executeShowIndexes(stmt *ast.ShowIndexesStatement) (interfac
 	return indexes, nil
 }
 
-func (e *Evaluator) executeAlterTable(stmt *ast.AlterTableStatement) (interface{}, error) {
+func (e *Evaluator) executeAlterTable(stmt *ast.AlterTableStatement) (any, error) {
 	logger.Debug("Executing ALTER TABLE statement for table: %s", stmt.TableName)
 
 	if stmt.DropConstraint {
@@ -524,8 +523,8 @@ func (e *Evaluator) executeAlterTable(stmt *ast.AlterTableStatement) (interface{
 	return nil, nil
 }
 
-func (e *Evaluator) filter(where ast.Expression) func(row []interface{}, columns []database.Column) (bool, error) {
-	return func(row []interface{}, columns []database.Column) (bool, error) {
+func (e *Evaluator) filter(where ast.Expression) func(row []any, columns []database.Column) (bool, error) {
+	return func(row []any, columns []database.Column) (bool, error) {
 		if where == nil {
 			return true, nil
 		}
@@ -566,7 +565,7 @@ func convertTokenTypeToColumnType(tokenType TokenType) (database.ColumnType, err
 	return 0, fmt.Errorf("unsupported token type: %s", tokenType)
 }
 
-func convertToNumeric(left, right interface{}) (float64, float64, error) {
+func convertToNumeric(left, right any) (float64, float64, error) {
 	var leftNum, rightNum float64
 
 	switch l := left.(type) {
@@ -604,6 +603,6 @@ func convertToNumeric(left, right interface{}) (float64, float64, error) {
 
 // tryNumericComparison attempts to convert two values to float64 for comparison
 // If either value is not a number, it returns an error
-func tryNumericComparison(left, right interface{}) (float64, float64, error) {
+func tryNumericComparison(left, right any) (float64, float64, error) {
 	return convertToNumeric(left, right)
 }

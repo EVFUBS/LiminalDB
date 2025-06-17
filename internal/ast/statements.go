@@ -4,7 +4,7 @@ import (
 	"LiminalDb/internal/database"
 )
 
-type Statement interface{}
+type Statement any
 
 type SelectStatement struct {
 	Fields    []string

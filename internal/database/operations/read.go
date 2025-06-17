@@ -12,7 +12,7 @@ import (
 type ReadRowRequest struct {
 	TableName string
 	Fields    []string
-	Filter    func([]interface{}, []database.Column) (bool, error)
+	Filter    func([]any, []database.Column) (bool, error)
 	Where     ast.Expression
 }
 
@@ -25,6 +25,9 @@ type IndexQuery struct {
 	Index         *indexing.Index
 	IndexMetaData *database.IndexMetadata
 	IndexKey      any
+}
+
+func test() {
 }
 
 func (o *OperationsImpl) ReadMetadata(filename string) (database.TableMetadata, error) {
@@ -61,7 +64,6 @@ func (o *OperationsImpl) ReadRows(tableName string, columns []string, filter Fil
 		IndexMetaData: nil,
 		IndexKey:      nil,
 	}, where)
-
 	if err != nil {
 		logger.Error("Failed to read rows using index: %v", err)
 		return nil, err
@@ -88,7 +90,6 @@ func (o *OperationsImpl) ReadRowsFullScan(table *database.Table, columns []strin
 	logger.Debug("Performing full table scan on table %s", table.Metadata.Name)
 	for _, row := range table.Data {
 		selectedRow, err := o.ReadRowFilterWithRequestedColumns(row, columns, table, filter)
-
 		if err != nil {
 			logger.Error("Failed to select row columns from table %s: %v", table.Metadata.Name, err)
 			return nil, err
@@ -118,7 +119,6 @@ func (o *OperationsImpl) ReadRowsUsingIndex(indexQuery *IndexQuery, where ast.Ex
 			indexQuery.IndexKey = indexKey
 
 			result, err := o.findRowsByIndex(indexQuery)
-
 			if err != nil {
 				logger.Error("Failed to find rows using index %s: %v", indexInfo.Name, err)
 			}

@@ -35,14 +35,13 @@ type Serializer interface {
 	DeserializeHeader(data []byte) (FileHeader, error)
 	SerializeMetadata(metadata TableMetadata) ([]byte, error)
 	DeserializeMetadata(data []byte) (TableMetadata, error)
-	SerializeRow(data []interface{}, columns []Column) ([]byte, error)
-	DeserializeRow(data []byte, columns []Column) ([]interface{}, error)
+	SerializeRow(data []any, columns []Column) ([]byte, error)
+	DeserializeRow(data []byte, columns []Column) ([]any, error)
 }
 
-type BinarySerializer struct {
-}
+type BinarySerializer struct{}
 
-func (b BinarySerializer) writeData(buf *bytes.Buffer, data interface{}) error {
+func (b BinarySerializer) writeData(buf *bytes.Buffer, data any) error {
 	return binary.Write(buf, binary.LittleEndian, data)
 }
 

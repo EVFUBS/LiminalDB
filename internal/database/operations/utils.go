@@ -12,7 +12,7 @@ func getIndexFilePath(tableName string, indexName string) string {
 }
 
 // extractIndexKeyFromRow extracts the key for an index from a row
-func (o *OperationsImpl) extractIndexKeyFromRow(row []interface{}, indexColumns []string, tableColumns []database.Column) (interface{}, error) {
+func (o *OperationsImpl) extractIndexKeyFromRow(row []any, indexColumns []string, tableColumns []database.Column) (any, error) {
 	if len(indexColumns) == 1 {
 		// Single column index
 		for i, col := range tableColumns {
@@ -34,9 +34,6 @@ func (o *OperationsImpl) extractIndexKeyFromRow(row []interface{}, indexColumns 
 		}
 		return strings.Join(keyParts, "|"), nil
 	}
-}
-
-func (o *OperationsImpl) extractIndexKeyFromFilter(filter, idxColumns []string, tableColumns []database.Column) {
 }
 
 // GetColumnIndex returns the index of a column in a table

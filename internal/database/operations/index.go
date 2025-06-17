@@ -12,10 +12,10 @@ import (
 
 type candidateIndex struct {
 	index *database.IndexMetadata
-	key   interface{}
+	key   any
 }
 
-func (o *OperationsImpl) findBestIndexColumn(table *database.Table, where ast.Expression) (*database.IndexMetadata, interface{}) {
+func (o *OperationsImpl) findBestIndexColumn(table *database.Table, where ast.Expression) (*database.IndexMetadata, any) {
 	if where == nil {
 		return nil, nil
 	}

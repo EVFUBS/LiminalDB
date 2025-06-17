@@ -14,8 +14,10 @@ const (
 	TypeTimestamp
 )
 
-const MagicNumber uint32 = 0x4D444247
-const CurrentVersion uint16 = 1
+const (
+	MagicNumber    uint32 = 0x4D444247
+	CurrentVersion uint16 = 1
+)
 
 const (
 	DatabaseDir   = "db"
@@ -34,7 +36,7 @@ type DatabaseFile struct {
 type Table struct {
 	Header   FileHeader
 	Metadata TableMetadata
-	Data     [][]interface{}
+	Data     [][]any
 }
 
 type FileHeader struct {
@@ -83,7 +85,7 @@ type ColumnType int8
 
 type QueryResult struct {
 	Columns []Column
-	Rows    [][]interface{}
+	Rows    [][]any
 }
 
 func (m *TableMetadata) ValidateMetadata() error {

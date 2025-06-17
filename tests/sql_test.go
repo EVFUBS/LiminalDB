@@ -303,7 +303,6 @@ func TestComplexQuery(t *testing.T) {
 			},
 		}, "Query 3 (Post HR Deletion)")
 	}
-
 }
 
 func TestSproc(t *testing.T) {

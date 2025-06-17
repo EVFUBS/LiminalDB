@@ -10,11 +10,10 @@ import (
 )
 
 // Helper functions for table formatting
-func calculateColumnWidths(columns []database.Column, rows [][]interface{}) []int {
+func calculateColumnWidths(columns []database.Column, rows [][]any) []int {
 	colWidths := make([]int, len(columns))
 	for i, col := range columns {
 		colWidths[i] = len(col.Name)
-		// Check data lengths
 		for _, row := range rows {
 			if i < len(row) {
 				valLen := len(fmt.Sprintf("%v", row[i]))
@@ -48,22 +47,21 @@ func writeTableFooter(sb *strings.Builder, colWidths []int) {
 func writeColumnNames(sb *strings.Builder, columns []database.Column, colWidths []int) {
 	sb.WriteString("|")
 	for i, col := range columns {
-		sb.WriteString(fmt.Sprintf(" %-*s |", colWidths[i], col.Name))
+		fmt.Fprintf(sb, " %-*s |", colWidths[i], col.Name)
 	}
 	sb.WriteString("\n")
 }
 
-func writeDataRow(sb *strings.Builder, row []interface{}, colWidths []int) {
+func writeDataRow(sb *strings.Builder, row []any, colWidths []int) {
 	sb.WriteString("|")
 	for i, val := range row {
 		if i < len(colWidths) {
-			sb.WriteString(fmt.Sprintf(" %-*v |", colWidths[i], formatValue(val)))
+			fmt.Fprintf(sb, " %-*v |", colWidths[i], formatValue(val))
 		}
 	}
 	sb.WriteString("\n")
 }
 
-// Main REPL function
 func Repl() {
 	logger.Info("Starting REPL session")
 	fmt.Println("Welcome to LiminalDB")
@@ -92,7 +90,6 @@ func Repl() {
 		logger.Debug("Processing command: %s", input)
 
 		result, err := Execute(input)
-
 		if err != nil {
 			logger.Error("Command execution failed: %v", err)
 			fmt.Printf("Error: %v\n", err)
@@ -120,7 +117,7 @@ func Execute(sql string) (any, error) {
 }
 
 // Result formatting functions
-func formatResult(result interface{}) string {
+func formatResult(result any) string {
 	switch v := result.(type) {
 	case *database.Table:
 		return formatTableResult(v)
@@ -286,7 +283,7 @@ func formatColumnType(col database.Column) string {
 	}
 }
 
-func formatValue(v interface{}) string {
+func formatValue(v any) string {
 	if v == nil {
 		return "NULL"
 	}

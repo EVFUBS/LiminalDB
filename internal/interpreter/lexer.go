@@ -117,14 +117,6 @@ func (l *Lexer) readIdentifier() string {
 	return l.input[position:l.position]
 }
 
-func (l *Lexer) readNumber() string {
-	position := l.position
-	for isDigit(l.ch) {
-		l.readChar()
-	}
-	return l.input[position:l.position]
-}
-
 func (l *Lexer) skipWhitespace() {
 	for l.ch == ' ' || l.ch == '\t' || l.ch == '\n' || l.ch == '\r' {
 		l.readChar()
@@ -203,6 +195,7 @@ var keywords = map[string]TokenType{
 	"and":        AND,
 	"or":         OR,
 	"constraint": CONSTRAINT,
+	"column":     COLUMN,
 }
 
 func LookupIdent(ident string) TokenType {
@@ -233,12 +226,10 @@ func (l *Lexer) readNumberToken() Token {
 	startPos := l.position
 	isFloat := false
 
-	// Read the integer part
 	for isDigit(l.ch) {
 		l.readChar()
 	}
 
-	// Check for decimal point
 	if l.ch == '.' {
 		isFloat = true
 		l.readChar()

@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-func (o *OperationsImpl) writeForeignKeyCheck(table *database.Table, newRow []interface{}) error {
+func (o *OperationsImpl) writeForeignKeyCheck(table *database.Table, newRow []any) error {
 	for _, foreignKey := range table.Metadata.ForeignKeys {
 
 		refTable, err := o.Serializer.ReadTableFromFile(foreignKey.ReferencedTable)

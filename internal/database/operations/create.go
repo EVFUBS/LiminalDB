@@ -38,7 +38,7 @@ func (o *OperationsImpl) CreateTable(metadata database.TableMetadata) error {
 			Version: database.CurrentVersion,
 		},
 		Metadata: metadata,
-		Data:     [][]interface{}{},
+		Data:     [][]any{},
 	}
 
 	err := o.Serializer.WriteTableToFile(table, metadata.Name)
