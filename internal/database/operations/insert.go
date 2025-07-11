@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-func (o *OperationsImpl) WriteRows(tableName string, data [][]interface{}) error {
+func (o *OperationsImpl) WriteRows(tableName string, data [][]any) error {
 	logger.Info("Writing %d rows to table: %s", len(data), tableName)
 
 	table, err := o.Serializer.ReadTableFromFile(tableName)

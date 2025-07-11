@@ -45,7 +45,7 @@ func (b BinarySerializer) writeData(buf *bytes.Buffer, data any) error {
 	return binary.Write(buf, binary.LittleEndian, data)
 }
 
-func (b BinarySerializer) readData(buf *bytes.Reader, data interface{}) error {
+func (b BinarySerializer) readData(buf *bytes.Reader, data any) error {
 	return binary.Read(buf, binary.LittleEndian, data)
 }
 
@@ -337,7 +337,20 @@ func (b BinarySerializer) DeserializeMetadata(buf *bytes.Reader) (TableMetadata,
 	return metadata, nil
 }
 
-func (b BinarySerializer) serializeValue(buf *bytes.Buffer, val interface{}, col Column) error {
+func (b BinarySerializer) serializeValue(buf *bytes.Buffer, val any, col Column) error {
+	if col.IsNullable {
+		if val == nil {
+			if err := b.writeData(buf, byte(0)); err != nil {
+				return err
+			}
+			return nil
+		} else {
+			if err := b.writeData(buf, byte(1)); err != nil {
+				return err
+			}
+		}
+	}
+
 	switch v := val.(type) {
 	case int64:
 		if col.DataType != TypeInteger64 {
@@ -378,9 +391,10 @@ func (b BinarySerializer) serializeValue(buf *bytes.Buffer, val interface{}, col
 		return b.writeData(buf, boolByte)
 
 	case time.Time:
-		if col.DataType != TypeTimestamp {
+		if col.DataType != TypeDatetime {
 			return errors.New("data type mismatch for column " + col.Name)
 		}
+		// Serialize as int64 (Unix seconds)
 		return b.writeData(buf, v.Unix())
 
 	default:
@@ -388,7 +402,7 @@ func (b BinarySerializer) serializeValue(buf *bytes.Buffer, val interface{}, col
 	}
 }
 
-func (b BinarySerializer) SerializeRow(data []interface{}, columns []Column) ([]byte, error) {
+func (b BinarySerializer) SerializeRow(data []any, columns []Column) ([]byte, error) {
 	buf := new(bytes.Buffer)
 
 	for i, val := range data {
@@ -401,10 +415,20 @@ func (b BinarySerializer) SerializeRow(data []interface{}, columns []Column) ([]
 	return buf.Bytes(), nil
 }
 
-func (b BinarySerializer) DeserializeRow(buf *bytes.Reader, columns []Column) ([]interface{}, error) {
-	var row []interface{}
+func (b BinarySerializer) DeserializeRow(buf *bytes.Reader, columns []Column) ([]any, error) {
+	var row []any
 
 	for _, col := range columns {
+		if col.IsNullable {
+			var nullFlag byte
+			if err := binary.Read(buf, binary.LittleEndian, &nullFlag); err != nil {
+				return nil, err
+			}
+			if nullFlag == 0 {
+				row = append(row, nil)
+				continue
+			}
+		}
 		switch col.DataType {
 		case TypeInteger64:
 			var val int64
@@ -439,12 +463,12 @@ func (b BinarySerializer) DeserializeRow(buf *bytes.Reader, columns []Column) ([
 				return nil, err
 			}
 			row = append(row, boolByte == 1)
-		case TypeTimestamp:
-			var unixTime int64
-			if err := binary.Read(buf, binary.LittleEndian, &unixTime); err != nil {
+		case TypeDatetime:
+			var unixSec int64
+			if err := binary.Read(buf, binary.LittleEndian, &unixSec); err != nil {
 				return nil, err
 			}
-			row = append(row, time.Unix(unixTime, 0))
+			row = append(row, time.Unix(unixSec, 0))
 		default:
 			panic("unhandled default case")
 		}
@@ -508,7 +532,7 @@ func (b BinarySerializer) DeserializeTable(data []byte) (*Table, error) {
 		return nil, err
 	}
 
-	rows := make([][]interface{}, metadata.RowCount)
+	rows := make([][]any, metadata.RowCount)
 	for i := range rows {
 		rows[i], err = b.DeserializeRow(buf, metadata.Columns)
 		if err != nil {

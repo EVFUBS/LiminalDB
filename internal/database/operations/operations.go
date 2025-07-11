@@ -19,6 +19,7 @@ type Operations interface {
 	DropIndex(tableName string, indexName string) error
 	ListIndexes(tableName string) ([]database.IndexMetadata, error)
 	DropConstraint(tableName string, constraintName string) error
+	AddColumnsToTable(tableName string, columns []database.Column) error
 }
 
 type OperationsImpl struct {

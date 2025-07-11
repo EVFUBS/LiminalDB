@@ -149,7 +149,7 @@ func (e *Evaluator) executeDropTable(stmt *ast.DropTableStatement) (any, error) 
 	return data, nil
 }
 
-func (e *Evaluator) executeDescribeTable(stmt *ast.DescribeTableStatement) (interface{}, error) {
+func (e *Evaluator) executeDescribeTable(stmt *ast.DescribeTableStatement) (any, error) {
 	logger.Debug("Executing DESCRIBE TABLE statement for table: %s", stmt.TableName)
 
 	data, err := e.describeTable(stmt.TableName)
@@ -162,7 +162,7 @@ func (e *Evaluator) executeDescribeTable(stmt *ast.DescribeTableStatement) (inte
 	return data, nil
 }
 
-func (e *Evaluator) executeCreateProcedure(stmt *ast.CreateProcedureStatement) (interface{}, error) {
+func (e *Evaluator) executeCreateProcedure(stmt *ast.CreateProcedureStatement) (any, error) {
 	logger.Debug("Executing CREATE PROCEDURE statement for procedure: %s", stmt.Name)
 
 	proc := storedproc.NewStoredProc(
@@ -182,7 +182,7 @@ func (e *Evaluator) executeCreateProcedure(stmt *ast.CreateProcedureStatement) (
 	return "Stored procedure created successfully", nil
 }
 
-func (e *Evaluator) executeAlterProcedure(stmt *ast.AlterProcedureStatement) (interface{}, error) {
+func (e *Evaluator) executeAlterProcedure(stmt *ast.AlterProcedureStatement) (any, error) {
 	logger.Debug("Executing ALTER PROCEDURE statement for procedure: %s", stmt.Name)
 
 	proc := storedproc.NewStoredProc(
@@ -202,7 +202,7 @@ func (e *Evaluator) executeAlterProcedure(stmt *ast.AlterProcedureStatement) (in
 	return "Stored procedure altered successfully", nil
 }
 
-func (e *Evaluator) executeStoredProcedure(stmt *ast.ExecStatement) (interface{}, error) {
+func (e *Evaluator) executeStoredProcedure(stmt *ast.ExecStatement) (any, error) {
 	proc := &storedproc.StoredProc{}
 	err := proc.ReadFromFile(stmt.Name)
 	if err != nil {
@@ -214,7 +214,7 @@ func (e *Evaluator) executeStoredProcedure(stmt *ast.ExecStatement) (interface{}
 			len(proc.Parameters), len(stmt.Parameters))
 	}
 
-	paramValues := make(map[string]interface{})
+	paramValues := make(map[string]any)
 	for i, param := range proc.Parameters {
 		paramValues[param.Name] = stmt.Parameters[i].GetValue()
 	}
@@ -234,7 +234,7 @@ func (e *Evaluator) executeStoredProcedure(stmt *ast.ExecStatement) (interface{}
 
 	// Split the body into individual statements
 	statements := strings.Split(processedBody, ";")
-	var lastResult interface{}
+	var lastResult any
 	var lastErr error
 
 	// Execute each statement
@@ -262,7 +262,7 @@ func (e *Evaluator) executeStoredProcedure(stmt *ast.ExecStatement) (interface{}
 	return lastResult, nil
 }
 
-func (e *Evaluator) Evaluate(expr ast.Expression, row []interface{}, columns []database.Column) (interface{}, error) {
+func (e *Evaluator) Evaluate(expr ast.Expression, row []any, columns []database.Column) (any, error) {
 	switch expr := expr.(type) {
 	case *ast.Identifier:
 		for i, col := range columns {
@@ -378,10 +378,10 @@ func (e *Evaluator) selectData(tableName string, fields []string, where ast.Expr
 	return e.operations.ReadRows(tableName, fields, e.filter(where), where)
 }
 
-func (e *Evaluator) insertData(tableName string, fields []string, values [][]ast.Expression) (interface{}, error) {
-	data := [][]interface{}{}
+func (e *Evaluator) insertData(tableName string, fields []string, values [][]ast.Expression) (any, error) {
+	data := [][]any{}
 	for _, value := range values {
-		row := make([]interface{}, len(fields))
+		row := make([]any, len(fields))
 		for i := range fields {
 			if i < len(value) {
 				row[i] = value[i].GetValue()
@@ -520,6 +520,14 @@ func (e *Evaluator) executeAlterTable(stmt *ast.AlterTableStatement) (any, error
 		}
 	}
 
+	if stmt.AddColumn {
+		err := e.operations.AddColumnsToTable(stmt.TableName, stmt.Columns)
+		if err != nil {
+			logger.Error("Failed to execute ADD CONSTRAINT statement: %v", err)
+			return nil, fmt.Errorf("failed to add constraint: %w", err)
+		}
+	}
+
 	return nil, nil
 }
 
@@ -552,14 +560,16 @@ func buildUpdateData(values []ast.Expression) (map[string]any, error) {
 
 func convertTokenTypeToColumnType(tokenType TokenType) (database.ColumnType, error) {
 	switch tokenType {
-	case INTTYPE:
+	case INT:
 		return database.TypeInteger64, nil
-	case FLOATTYPE:
+	case FLOAT:
 		return database.TypeFloat64, nil
-	case STRINGTYPE:
+	case STRING:
 		return database.TypeString, nil
-	case BOOLTYPE:
+	case BOOL:
 		return database.TypeBoolean, nil
+	case DATETIME:
+		return database.TypeDatetime, nil
 	}
 
 	return 0, fmt.Errorf("unsupported token type: %s", tokenType)

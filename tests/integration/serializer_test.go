@@ -1,4 +1,4 @@
-package tests
+package integration
 
 import (
 	"LiminalDb/internal/database"
@@ -152,11 +152,11 @@ func TestSerializeRow(t *testing.T) {
 		{Name: "name", DataType: database.TypeString, Length: 100},
 		{Name: "age", DataType: database.TypeInteger64},
 		{Name: "active", DataType: database.TypeBoolean},
-		{Name: "created_at", DataType: database.TypeTimestamp},
+		{Name: "created_at", DataType: database.TypeDatetime},
 	}
 
 	now := time.Now()
-	row := []interface{}{
+	row := []any{
 		int64(1),
 		"John Doe",
 		int64(30),
@@ -230,7 +230,7 @@ func TestSerializeTable(t *testing.T) {
 				},
 			},
 		},
-		Data: [][]interface{}{
+		Data: [][]any{
 			{int64(1), "John Doe", int64(30)},
 			{int64(2), "Jane Smith", int64(25)},
 		},
@@ -296,7 +296,7 @@ func TestInvalidDataTypes(t *testing.T) {
 	}
 
 	// Test invalid data type
-	row := []interface{}{"not an integer"}
+	row := []any{"not an integer"}
 	serializer := database.BinarySerializer{}
 	_, err := serializer.SerializeRow(row, columns)
 	if err == nil {
@@ -310,7 +310,7 @@ func TestStringLengthExceeded(t *testing.T) {
 	}
 
 	// Test string exceeding length
-	row := []interface{}{"too long string"}
+	row := []any{"too long string"}
 	serializer := database.BinarySerializer{}
 	_, err := serializer.SerializeRow(row, columns)
 	if err == nil {

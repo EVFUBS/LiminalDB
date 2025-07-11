@@ -86,7 +86,7 @@ func extractAssignments(where ast.Expression) (assignments map[string]any) {
 	return assignments
 }
 
-func extractAssignment(expr ast.Expression) (colName string, val interface{}, found bool) {
+func extractAssignment(expr ast.Expression) (colName string, val any, found bool) {
 	binExpr, ok := expr.(*ast.AssignmentExpression)
 	if !ok || binExpr.Op != "=" {
 		return "", nil, false

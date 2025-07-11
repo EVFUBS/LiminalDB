@@ -2,6 +2,7 @@ package interpreter
 
 import (
 	. "LiminalDb/internal/common"
+	"regexp"
 	"strings"
 )
 
@@ -66,8 +67,14 @@ func (l *Lexer) NextToken() Token {
 	case '/':
 		tok = newToken(DIVIDE, l.ch)
 	case '\'':
-		tok.Type = STRING
-		tok.Literal = l.readString()
+		strVal := l.readString()
+		if isDateTimeString(strVal) {
+			tok.Type = DATETIME
+			tok.Literal = strVal
+		} else {
+			tok.Type = STRING
+			tok.Literal = strVal
+		}
 		return tok
 	case '<':
 		if l.peekChar() == '=' {
@@ -160,10 +167,11 @@ var keywords = map[string]TokenType{
 	"drop":       DROP,
 	"update":     UPDATE,
 	"set":        SET,
-	"int":        INTTYPE,
-	"float":      FLOATTYPE,
-	"bool":       BOOLTYPE,
-	"string":     STRINGTYPE,
+	"int":        INT,
+	"float":      FLOAT,
+	"bool":       BOOL,
+	"string":     STRING,
+	"datetime":   DATETIME,
 	"null":       NULL,
 	"not":        NOT,
 	"delete":     DELETE,
@@ -196,6 +204,8 @@ var keywords = map[string]TokenType{
 	"or":         OR,
 	"constraint": CONSTRAINT,
 	"column":     COLUMN,
+	"default":    DEFAULT,
+	"add":        ADD,
 }
 
 func LookupIdent(ident string) TokenType {
@@ -219,6 +229,22 @@ func (l *Lexer) readString() string {
 	l.readChar()
 
 	return value
+}
+
+func isDateTimeString(s string) bool {
+	fullDateTimePattern := `^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$`
+	dateTimeNoSecondsPattern := `^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$`
+	datePattern := `^\d{4}-\d{2}-\d{2}$`
+	if matched, _ := regexp.MatchString(fullDateTimePattern, s); matched {
+		return true
+	}
+	if matched, _ := regexp.MatchString(dateTimeNoSecondsPattern, s); matched {
+		return true
+	}
+	if matched, _ := regexp.MatchString(datePattern, s); matched {
+		return true
+	}
+	return false
 }
 
 func (l *Lexer) readNumberToken() Token {

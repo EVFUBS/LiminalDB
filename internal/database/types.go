@@ -11,7 +11,7 @@ const (
 	TypeFloat64
 	TypeString
 	TypeBoolean
-	TypeTimestamp
+	TypeDatetime
 )
 
 const (
@@ -58,9 +58,11 @@ type TableMetadata struct {
 type Column struct {
 	Name         string
 	DataType     ColumnType
-	Length       uint16 // For variable-length types like strings
+	Length       uint16
 	IsNullable   bool
 	IsPrimaryKey bool
+	DefaultValue any
+	Null         bool
 }
 
 type ForeignKeyConstraint struct {
@@ -150,7 +152,7 @@ func (c ColumnType) String() string {
 		return "STRING"
 	case TypeBoolean:
 		return "BOOL"
-	case TypeTimestamp:
+	case TypeDatetime:
 		return "TIMESTAMP"
 	default:
 		return "UNKNOWN"

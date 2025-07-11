@@ -5,18 +5,13 @@ const (
 	EOF     = "EOF"
 
 	// Identifiers + literals
-	IDENT  = "IDENT"  // add, foobar, x, y, ...
-	INT    = "INT"    // 1343456
-	STRING = "STRING" // "foo bar"
-	FLOAT  = "FLOAT"  // 123.456
-	BOOL   = "BOOL"   // true, false
-	ALL    = "ALL"    // For SELECT * queries
-
-	// Types
-	INTTYPE    = "INT"
-	FLOATTYPE  = "FLOAT"
-	BOOLTYPE   = "BOOL"
-	STRINGTYPE = "STRING"
+	IDENT    = "IDENT"    // add, foobar, x, y, ...
+	INT      = "INT"      // 1343456
+	STRING   = "STRING"   // "foo bar"
+	FLOAT    = "FLOAT"    // 123.456
+	BOOL     = "BOOL"     // true, false
+	ALL      = "ALL"      // For SELECT * queries
+	DATETIME = "DATETIME" // For date and time values
 
 	// Operators
 	ASSIGN   = "="
@@ -67,6 +62,7 @@ const (
 	CONSTRAINT = "CONSTRAINT"
 	ADD        = "ADD"
 	COLUMN     = "COLUMN"
+	DEFAULT    = "DEFAULT"
 
 	// Stored Procedure Keywords
 	PROCEDURE = "PROCEDURE"

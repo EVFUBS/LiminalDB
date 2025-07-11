@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Parser struct {
@@ -455,11 +456,19 @@ func (p *Parser) parseAlterTableStatement() (*ast.AlterTableStatement, error) {
 
 	if p.peekTokenIs(ADD) {
 		p.nextToken()
+
+		if !p.expectPeek(COLUMN) {
+			return nil, fmt.Errorf("expected column, got %s", p.curToken.Literal)
+		}
+
+		p.nextToken()
+
 		stmt.AddColumn = true
 		columnToAdd := p.parseColumnDefinition()
 		stmt.Columns = append(stmt.Columns, *columnToAdd)
 	}
-	// TODO: Support more than drop constraint
+
+	// TODO: Support more than drop constraint and add constraint
 
 	return stmt, nil
 }
@@ -565,8 +574,8 @@ func (p *Parser) parseColumnDefinition() *database.Column {
 		IsPrimaryKey: false,
 	}
 
-	if !p.expectPeek(INTTYPE) && !p.expectPeek(FLOATTYPE) &&
-		!p.expectPeek(STRINGTYPE) && !p.expectPeek(BOOLTYPE) {
+	if !p.expectPeek(INT) && !p.expectPeek(FLOAT) &&
+		!p.expectPeek(STRING) && !p.expectPeek(BOOL) && !p.expectPeek(DATETIME) {
 		return nil
 	}
 
@@ -599,6 +608,38 @@ func (p *Parser) parseColumnDefinition() *database.Column {
 
 		if !p.expectPeek(RPAREN) {
 			return nil
+		}
+	}
+
+	if p.peekTokenIs(DEFAULT) {
+		p.nextToken()
+		p.nextToken()
+		switch p.curToken.Type {
+		case STRING:
+			col.DefaultValue = p.curToken.Literal
+		case INT:
+			val, err := strconv.Atoi(p.curToken.Literal)
+			if err == nil {
+				col.DefaultValue = val
+			}
+		case FLOAT:
+			val, err := strconv.ParseFloat(p.curToken.Literal, 64)
+			if err == nil {
+				col.DefaultValue = val
+			}
+		case BOOL:
+			val, err := strconv.ParseBool(p.curToken.Literal)
+			if err == nil {
+				col.DefaultValue = val
+			}
+		case DATETIME:
+			// TODO: Support more date formats
+			val, err := time.Parse("2006-01-02 15:04:05", p.curToken.Literal)
+			if err == nil {
+				col.DefaultValue = val
+			}
+		default:
+			col.DefaultValue = p.curToken.Literal
 		}
 	}
 
@@ -656,7 +697,6 @@ func (p *Parser) parseIdentifierList() []string {
 	return identifiers
 }
 
-// Precedence levels
 const (
 	_ int = iota
 	LOWEST
@@ -708,6 +748,8 @@ func (p *Parser) parseExpressionWithPrecedence(precedence int) ast.Expression {
 	switch {
 	case p.curToken.Type == VARIABLE:
 		leftExpr = p.parseVariable()
+	case p.curToken.Type == DATETIME:
+		leftExpr = p.parseDateTimeLiteral()
 	case p.curToken.Type == STRING:
 		leftExpr = p.parseStringLiteral()
 	case p.curToken.Type == INT:
@@ -789,6 +831,14 @@ func (p *Parser) parseBooleanLiteral() ast.Expression {
 		return nil
 	}
 	return &ast.BooleanLiteral{Value: value}
+}
+
+func (p *Parser) parseDateTimeLiteral() ast.Expression {
+	value, err := time.ParseInLocation("2006-01-02 15:04:05", p.curToken.Literal, time.UTC)
+	if err != nil {
+		return nil
+	}
+	return &ast.DateTimeLiteral{Value: value.UTC()}
 }
 
 func (p *Parser) parseIdentifier() ast.Expression {

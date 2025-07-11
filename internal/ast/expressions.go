@@ -1,5 +1,7 @@
 package ast
 
+import "time"
+
 type Expression interface {
 	GetValue() any
 }
@@ -66,6 +68,14 @@ type BooleanLiteral struct {
 
 func (b *BooleanLiteral) GetValue() any {
 	return b.Value
+}
+
+type DateTimeLiteral struct {
+	Value time.Time
+}
+
+func (d *DateTimeLiteral) GetValue() any {
+	return d.Value
 }
 
 type VariableExpression struct {

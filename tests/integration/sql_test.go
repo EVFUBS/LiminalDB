@@ -1,4 +1,4 @@
-package tests
+package integration
 
 import (
 	"LiminalDb/internal/database"
@@ -400,6 +400,227 @@ func TestDropForeignKey(t *testing.T) {
 	if err != nil {
 		t.Errorf("Expected success when inserting order after dropping foreign key, got error: %v", err)
 	}
+}
+
+func TestAddColumnNoData(t *testing.T) {
+	defer cleanupDB(t)
+	_, err := execute("CREATE TABLE products (pid int primary key, pname string(50))")
+	if err != nil {
+		t.Fatalf("Failed to create products table: %v", err)
+	}
+
+	// Add a new column without any data
+	alterSQL := "ALTER TABLE products ADD COLUMN price float"
+	_, err = execute(alterSQL)
+	if err != nil {
+		t.Fatalf("Failed to add column: %v", err)
+	}
+
+	selectSQL := "SELECT pid, pname, price FROM products"
+	result, err := execute(selectSQL)
+	if err != nil {
+		t.Fatalf("Failed to execute SELECT after adding column: %v", err)
+	}
+
+	expected := &database.QueryResult{
+		Columns: []database.Column{
+			{
+				Name:         "pid",
+				DataType:     database.TypeInteger64,
+				Length:       0,
+				IsNullable:   false,
+				IsPrimaryKey: true,
+			},
+			{
+				Name:         "pname",
+				DataType:     database.TypeString,
+				Length:       50,
+				IsNullable:   true,
+				IsPrimaryKey: false,
+			},
+			{
+				Name:       "price",
+				DataType:   database.TypeFloat64,
+				Length:     0,
+				IsNullable: true,
+			},
+		},
+		Rows: [][]any{},
+	}
+
+	assertSelectResult(t, result, expected, "Add Column No Data Result")
+}
+
+func TestAddColumnWithData(t *testing.T) {
+	defer cleanupDB(t)
+	_, err := execute("CREATE TABLE products (pid int primary key, pname string(50))")
+	if err != nil {
+		t.Fatalf("Failed to create products table: %v", err)
+	}
+
+	_, err = execute("INSERT INTO products (pid, pname) VALUES (1, 'Product A')")
+	if err != nil {
+		t.Fatalf("Failed to insert initial data: %v", err)
+	}
+
+	alterSQL := "ALTER TABLE products ADD COLUMN price float DEFAULT 9.99"
+	_, err = execute(alterSQL)
+	if err != nil {
+		t.Fatalf("Failed to add column with default value: %v", err)
+	}
+
+	selectSQL := "SELECT pid, pname, price FROM products"
+	result, err := execute(selectSQL)
+	if err != nil {
+		t.Fatalf("Failed to execute SELECT after adding column: %v", err)
+	}
+
+	expected := &database.QueryResult{
+		Columns: []database.Column{
+			{
+				Name:         "pid",
+				DataType:     database.TypeInteger64,
+				Length:       0,
+				IsNullable:   false,
+				IsPrimaryKey: true,
+			},
+			{
+				Name:         "pname",
+				DataType:     database.TypeString,
+				Length:       50,
+				IsNullable:   true,
+				IsPrimaryKey: false,
+			},
+			{
+				Name:       "price",
+				DataType:   database.TypeFloat64,
+				Length:     0,
+				IsNullable: true,
+			},
+		},
+		Rows: [][]any{
+			{int64(1), "Product A", 9.99},
+		},
+	}
+
+	assertSelectResult(t, result, expected, "Add Column With Data Result")
+}
+
+func TestAddColumnWithExistingData(t *testing.T) {
+	defer cleanupDB(t)
+	_, err := execute("CREATE TABLE products (pid int primary key, pname string(50))")
+	if err != nil {
+		t.Fatalf("Failed to create products table: %v", err)
+	}
+
+	_, err = execute("INSERT INTO products (pid, pname) VALUES (1, 'Product A')")
+	if err != nil {
+		t.Fatalf("Failed to insert initial data: %v", err)
+	}
+
+	alterSQL := "ALTER TABLE products ADD COLUMN price float NULL"
+	_, err = execute(alterSQL)
+	if err != nil {
+		t.Fatalf("Failed to add column without default value: %v", err)
+	}
+
+	selectSQL := "SELECT pid, pname, price FROM products"
+	result, err := execute(selectSQL)
+	if err != nil {
+		t.Fatalf("Failed to execute SELECT after adding column: %v", err)
+	}
+
+	expected := &database.QueryResult{
+		Columns: []database.Column{
+			{
+				Name:         "pid",
+				DataType:     database.TypeInteger64,
+				Length:       0,
+				IsNullable:   false,
+				IsPrimaryKey: true,
+			},
+			{
+				Name:         "pname",
+				DataType:     database.TypeString,
+				Length:       50,
+				IsNullable:   true,
+				IsPrimaryKey: false,
+			},
+			{
+				Name:       "price",
+				DataType:   database.TypeFloat64,
+				Length:     0,
+				IsNullable: true,
+			},
+		},
+		Rows: [][]any{
+			{int64(1), "Product A", nil},
+		},
+	}
+
+	assertSelectResult(t, result, expected, "Add Column With Existing Data Result")
+}
+
+func TestAddColumnWithExistingDataNoDefault(t *testing.T) {
+	defer cleanupDB(t)
+	_, err := execute("CREATE TABLE products (pid int primary key, pname string(50))")
+	if err != nil {
+		t.Fatalf("Failed to create products table: %v", err)
+	}
+
+	_, err = execute("INSERT INTO products (pid, pname) VALUES (1, 'Product A')")
+	if err != nil {
+		t.Fatalf("Failed to insert initial data: %v", err)
+	}
+
+	alterSQL := "ALTER TABLE products ADD COLUMN price float NOT NULL"
+	_, err = execute(alterSQL)
+	if err == nil {
+		t.Errorf("Expected error when adding non-nullable column without default value, got nil")
+	}
+}
+
+func TestTimestamp(t *testing.T) {
+	defer cleanupDB(t)
+	_, err := execute("CREATE TABLE events (id int primary key, event_time datetime)")
+	if err != nil {
+		t.Fatalf("Failed to create events table: %v", err)
+	}
+
+	insertSQL := "INSERT INTO events (id, event_time) VALUES (1, '2023-10-01 12:00:00')"
+	_, err = execute(insertSQL)
+	if err != nil {
+		t.Fatalf("Failed to insert row with timestamp: %v", err)
+	}
+
+	selectSQL := "SELECT id, event_time FROM events WHERE id = 1"
+	result, err := execute(selectSQL)
+	if err != nil {
+		t.Fatalf("Failed to execute SELECT with timestamp: %v", err)
+	}
+
+	expected := &database.QueryResult{
+		Columns: []database.Column{
+			{
+				Name:         "id",
+				DataType:     database.TypeInteger64,
+				Length:       0,
+				IsNullable:   false,
+				IsPrimaryKey: true,
+			},
+			{
+				Name:       "event_time",
+				DataType:   database.TypeDatetime,
+				Length:     0,
+				IsNullable: true,
+			},
+		},
+		Rows: [][]any{
+			{int64(1), "2023-10-01 12:00:00"},
+		},
+	}
+
+	assertSelectResult(t, result, expected, "Timestamp Result")
 }
 
 func assertSelectResult(t *testing.T, actualResult any, expected *database.QueryResult, queryName string) {

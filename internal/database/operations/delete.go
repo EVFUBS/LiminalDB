@@ -37,7 +37,7 @@ func (o *OperationsImpl) DeleteRows(tableName string, filter Filter) (int64, err
 	}
 
 	originalLength := len(table.Data)
-	newData := make([][]interface{}, 0, originalLength)
+	newData := make([][]any, 0, originalLength)
 	newRowIDs := make(map[int]int)
 
 	for i, row := range table.Data {
@@ -108,7 +108,7 @@ func (o *OperationsImpl) DeleteRows(tableName string, filter Filter) (int64, err
 	return deletedCount, nil
 }
 
-func (o *OperationsImpl) DetermineRowsToDelete(table *database.Table, filter func([]interface{}, []database.Column) (bool, error)) ([]bool, error) {
+func (o *OperationsImpl) DetermineRowsToDelete(table *database.Table, filter func([]any, []database.Column) (bool, error)) ([]bool, error) {
 	rowsToDelete := make([]bool, len(table.Data))
 	for i, row := range table.Data {
 		if filter != nil {
