@@ -1,42 +1,42 @@
 package operations
 
 import (
-	"LiminalDb/internal/database"
+	"LiminalDb/internal/database/serializer"
 	"LiminalDb/internal/logger"
 	"fmt"
 	"os"
 )
 
-func (o *OperationsImpl) DropTable(tableName string) error {
-	logger.Info("Dropping table: %s", tableName)
+func (o *OperationsImpl) DropTable(op *Operation) *Result {
+	logger.Info("Dropping table: %s", op.TableName)
 
-	table, err := o.Serializer.ReadTableFromFile(tableName)
+	table, err := o.Serializer.ReadTableFromFile(op.TableName)
 	if err != nil {
 		if os.IsNotExist(err) {
-			logger.Info("Table %s does not exist", tableName)
-			return fmt.Errorf("table %s does not exist", tableName)
+			logger.Info("Table %s does not exist", op.TableName)
+			return &Result{Err: fmt.Errorf("table %s does not exist", op.TableName)}
 		}
-		logger.Error("Failed to read table %s: %v", tableName, err)
-		return err
+		logger.Error("Failed to read table %s: %v", op.TableName, err)
+		return &Result{Err: err}
 	}
 
 	for _, idx := range table.Metadata.Indexes {
-		indexFilePath := getIndexFilePath(tableName, idx.Name)
+		indexFilePath := getIndexFilePath(op.TableName, idx.Name)
 		if err := os.Remove(indexFilePath); err != nil && !os.IsNotExist(err) {
 			logger.Error("Failed to remove index file %s: %v", indexFilePath, err)
 		} else {
-			logger.Info("Dropped index %s from table %s", idx.Name, tableName)
+			logger.Info("Dropped index %s from table %s", idx.Name, op.TableName)
 		}
 	}
 
-	err = os.Remove(database.GetTableFilePath(tableName))
+	err = os.Remove(serializer.GetTableFilePath(op.TableName))
 	if err != nil {
-		logger.Error("Failed to drop table %s: %v", tableName, err)
-		return err
+		logger.Error("Failed to drop table %s: %v", op.TableName, err)
+		return &Result{Err: err}
 	}
 
-	logger.Info("Table %s dropped successfully", tableName)
-	return nil
+	logger.Info("Table %s dropped successfully", op.TableName)
+	return &Result{}
 }
 
 func (o *OperationsImpl) DropConstraint(tableName string, constraintName string) error {

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func execute(sql string) (any, error) {
@@ -48,6 +49,55 @@ func TestInsertRow(t *testing.T) {
 	_, err = execute(insertSQL)
 	if err != nil {
 		t.Fatalf("Failed to execute INSERT: %v", err)
+	}
+}
+
+func TestUpdateRow(t *testing.T) {
+	defer cleanupDB(t)
+	_, err := execute("CREATE TABLE items (id int primary key, description string(200))")
+	if err != nil {
+		t.Fatalf("Failed to create table for update test: %v", err)
+	}
+
+	_, err = execute("INSERT INTO items (id, description) VALUES (1, 'Old Description')")
+	if err != nil {
+		t.Fatalf("Failed to insert row for update test: %v", err)
+	}
+
+	updateSQL := "UPDATE items SET description = 'Updated Description' WHERE id = 1"
+	_, err = execute(updateSQL)
+	if err != nil {
+		t.Fatalf("Failed to execute UPDATE: %v", err)
+	}
+
+	selectSQL := "SELECT description FROM items WHERE id = 1"
+	result, err := execute(selectSQL)
+	if err != nil {
+		t.Fatalf("Failed to execute SELECT after UPDATE: %v", err)
+	}
+
+	expected := &database.QueryResult{
+		Columns: []database.Column{
+			{
+				Name:         "description",
+				DataType:     database.TypeString,
+				Length:       200,
+				IsNullable:   true,
+				IsPrimaryKey: false,
+			},
+		},
+		Rows: [][]any{
+			{"Updated Description"},
+		},
+	}
+
+	resultSlice, ok := result.(*database.QueryResult)
+	if !ok {
+		t.Fatalf("SELECT result is not of expected type *database.QueryResult, got %T", result)
+	}
+
+	if !reflect.DeepEqual(resultSlice, expected) {
+		t.Errorf("SELECT result mismatch. Expected %v, got %v", expected, resultSlice)
 	}
 }
 
@@ -616,7 +666,7 @@ func TestTimestamp(t *testing.T) {
 			},
 		},
 		Rows: [][]any{
-			{int64(1), "2023-10-01 12:00:00"},
+			{int64(1), time.Date(2023, 10, 1, 12, 0, 0, 0, time.UTC)},
 		},
 	}
 

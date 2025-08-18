@@ -2,6 +2,9 @@ package main
 
 import (
 	"LiminalDb/internal/interpreter"
+	"LiminalDb/internal/interpreter/eval"
+	"LiminalDb/internal/interpreter/lexer"
+	"LiminalDb/internal/interpreter/parser"
 	"LiminalDb/internal/logger"
 	"fmt"
 	"os"
@@ -18,9 +21,9 @@ func main() {
 func test() {
 	sql := "select * from test where id < 2"
 
-	lexer := interpreter.NewLexer(sql)
-	parser := interpreter.NewParser(lexer)
-	evaluator := interpreter.NewEvaluator(parser)
+	lexer := lexer.NewLexer(sql)
+	parser := parser.NewParser(lexer)
+	evaluator := eval.NewEvaluator(parser)
 	result, err := evaluator.Execute(sql)
 	if err != nil {
 		logger.Error("Test execution failed: %v", err)

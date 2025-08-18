@@ -61,7 +61,7 @@ func (o *OperationsImpl) updateRows(table *database.Table, rows [][]any, data ma
 }
 
 func (o *OperationsImpl) UpdateTableWithRows(table *database.Table, rows [][]any) error {
-	primaryKeyIndex, err := o.GetPrimaryKeyIndexFromMetadata(table)
+	primaryKeyIndex, err := o.GetPrimaryKeyIndex(table)
 	if err != nil {
 		return err
 	}

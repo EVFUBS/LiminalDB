@@ -1,4 +1,4 @@
-package interpreter
+package lexer
 
 import (
 	. "LiminalDb/internal/common"
@@ -259,7 +259,6 @@ func (l *Lexer) readNumberToken() Token {
 	if l.ch == '.' {
 		isFloat = true
 		l.readChar()
-		// Read decimal places
 		for isDigit(l.ch) {
 			l.readChar()
 		}

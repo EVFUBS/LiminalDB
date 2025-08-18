@@ -2,6 +2,9 @@ package interpreter
 
 import (
 	"LiminalDb/internal/database"
+	"LiminalDb/internal/interpreter/eval"
+	"LiminalDb/internal/interpreter/lexer"
+	"LiminalDb/internal/interpreter/parser"
 	"LiminalDb/internal/logger"
 	"bufio"
 	"fmt"
@@ -110,13 +113,12 @@ func Repl() {
 }
 
 func Execute(sql string) (any, error) {
-	lexer := NewLexer(sql)
-	parser := NewParser(lexer)
-	evaluator := NewEvaluator(parser)
+	lexer := lexer.NewLexer(sql)
+	parser := parser.NewParser(lexer)
+	evaluator := eval.NewEvaluator(parser)
 	return evaluator.Execute(sql)
 }
 
-// Result formatting functions
 func formatResult(result any) string {
 	switch v := result.(type) {
 	case *database.Table:
@@ -126,7 +128,7 @@ func formatResult(result any) string {
 	case *database.QueryResult:
 		return formatQueryResult(v)
 	case string:
-		return v // Already formatted messages like "Insert successful"
+		return v
 	default:
 		return fmt.Sprintf("%v", v)
 	}

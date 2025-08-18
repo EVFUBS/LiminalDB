@@ -7,7 +7,8 @@ import (
 	"os"
 )
 
-func (o *OperationsImpl) CreateTable(metadata database.TableMetadata) error {
+func (o *OperationsImpl) CreateTable(op *Operation) *Result {
+	metadata := op.Metadata
 	logger.Info("Creating table: %s", metadata.Name)
 
 	if metadata.Indexes == nil {
@@ -44,7 +45,7 @@ func (o *OperationsImpl) CreateTable(metadata database.TableMetadata) error {
 	err := o.Serializer.WriteTableToFile(table, metadata.Name)
 	if err != nil {
 		logger.Error("Failed to create table %s: %v", metadata.Name, err)
-		return err
+		return &Result{Err: err}
 	}
 
 	for _, idx := range metadata.Indexes {
@@ -53,18 +54,18 @@ func (o *OperationsImpl) CreateTable(metadata database.TableMetadata) error {
 		indexBytes, err := indexing.SerializeIndex(index)
 		if err != nil {
 			logger.Error("Failed to serialize index %s: %v", idx.Name, err)
-			return err
+			return &Result{Err: err}
 		}
 
 		indexFilePath := getIndexFilePath(metadata.Name, idx.Name)
 		if err := os.WriteFile(indexFilePath, indexBytes, 0666); err != nil {
 			logger.Error("Failed to write index file %s: %v", indexFilePath, err)
-			return err
+			return &Result{Err: err}
 		}
 
 		logger.Info("Created index %s on table %s", idx.Name, metadata.Name)
 	}
 
 	logger.Info("Table %s created successfully", metadata.Name)
-	return nil
+	return &Result{Data: &database.QueryResult{Rows: [][]any{}}}
 }

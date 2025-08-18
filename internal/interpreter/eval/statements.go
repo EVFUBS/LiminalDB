@@ -1,50 +1,15 @@
-package interpreter
+package eval
 
 import (
 	"LiminalDb/internal/ast"
-	. "LiminalDb/internal/common"
 	"LiminalDb/internal/database"
-	"LiminalDb/internal/database/operations"
+	ops "LiminalDb/internal/database/operations"
+	l "LiminalDb/internal/interpreter/lexer"
 	"LiminalDb/internal/logger"
 	"LiminalDb/internal/storedproc"
 	"fmt"
 	"strings"
 )
-
-type Evaluator struct {
-	parser     *Parser
-	operations operations.Operations
-}
-
-func NewEvaluator(parser *Parser) *Evaluator {
-	return &Evaluator{
-		parser:     parser,
-		operations: &operations.OperationsImpl{},
-	}
-}
-
-func (e *Evaluator) Execute(query string) (any, error) {
-	logger.Debug("Executing query: %s", query)
-
-	e.parser.lexer = NewLexer(query)
-	e.parser.nextToken()
-	e.parser.nextToken()
-
-	stmt, err := e.parser.ParseStatement()
-	if err != nil || stmt == nil {
-		logger.Error("Failed to parse query: %s with error: %s", query, err)
-		return nil, fmt.Errorf("failed to parse query: %s with error: %s", query, err)
-	}
-
-	result, err := e.executeStatement(stmt)
-	if err != nil {
-		logger.Error("Failed to execute statement: %v", err)
-		return nil, err
-	}
-
-	logger.Debug("Query executed successfully")
-	return result, nil
-}
 
 func (e *Evaluator) executeStatement(stmt ast.Statement) (any, error) {
 	logger.Debug("Executing statement of type: %T", stmt)
@@ -95,6 +60,21 @@ func (e *Evaluator) executeSelect(stmt *ast.SelectStatement) (*database.QueryRes
 
 	logger.Debug("SELECT statement executed successfully")
 	return data, nil
+}
+
+func (e *Evaluator) executeUpdate(stmt *ast.UpdateStatement) (any, error) {
+	data, err := buildUpdateData(stmt.Values)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build update data: %w", err)
+	}
+
+	logger.Debug("Executing UPDATE statement on table: %s", stmt.TableName)
+	err = e.operations.UpdateRows(stmt.TableName, data, e.filter(stmt.Where))
+	if err != nil {
+		return nil, fmt.Errorf("failed to update table: %w", err)
+	}
+
+	return "Update successful", nil
 }
 
 func (e *Evaluator) executeInsert(stmt *ast.InsertStatement) (any, error) {
@@ -244,9 +224,9 @@ func (e *Evaluator) executeStoredProcedure(stmt *ast.ExecStatement) (any, error)
 			continue
 		}
 
-		e.parser.lexer = NewLexer(statement)
-		e.parser.nextToken()
-		e.parser.nextToken()
+		e.parser.Lexer = l.NewLexer(statement)
+		e.parser.NextToken()
+		e.parser.NextToken()
 
 		stmt, err := e.parser.ParseStatement()
 		if err != nil || stmt == nil {
@@ -262,159 +242,6 @@ func (e *Evaluator) executeStoredProcedure(stmt *ast.ExecStatement) (any, error)
 	return lastResult, nil
 }
 
-func (e *Evaluator) Evaluate(expr ast.Expression, row []any, columns []database.Column) (any, error) {
-	switch expr := expr.(type) {
-	case *ast.Identifier:
-		for i, col := range columns {
-			if col.Name == expr.Value {
-				return row[i], nil
-			}
-		}
-		return nil, fmt.Errorf("column not found: %s", expr.Value)
-	case *ast.StringLiteral:
-		return expr.Value, nil
-	case *ast.Int64Literal:
-		return expr.Value, nil
-	case *ast.Float64Literal:
-		return expr.Value, nil
-	case *ast.BooleanLiteral:
-		return expr.Value, nil
-	case *ast.BinaryExpression:
-		left, err := e.Evaluate(expr.Left, row, columns)
-		if err != nil {
-			return nil, err
-		}
-		right, err := e.Evaluate(expr.Right, row, columns)
-		if err != nil {
-			return nil, err
-		}
-
-		// Convert operands to numeric types if needed
-		leftNum, rightNum, err := convertToNumeric(left, right)
-		if err != nil {
-			return nil, err
-		}
-
-		switch expr.Op {
-		case "+":
-			return leftNum + rightNum, nil
-		case "-":
-			return leftNum - rightNum, nil
-		case "*":
-			return leftNum * rightNum, nil
-		case "/":
-			if rightNum == 0 {
-				return nil, fmt.Errorf("division by zero")
-			}
-			return leftNum / rightNum, nil
-		default:
-			return nil, fmt.Errorf("unsupported binary operator: %s", expr.Op)
-		}
-	case *ast.AssignmentExpression:
-		left, err := e.Evaluate(expr.Left, row, columns)
-		if err != nil {
-			return nil, err
-		}
-		right, err := e.Evaluate(expr.Right, row, columns)
-		if err != nil {
-			return nil, err
-		}
-		switch expr.Op {
-		case "=":
-			// Try numeric comparison first
-			leftNum, rightNum, err := tryNumericComparison(left, right)
-			if err == nil {
-				// Both values are numeric, compare them as float64
-				return leftNum == rightNum, nil
-			}
-			// Fall back to direct comparison
-			return left == right, nil
-		case "!=":
-			// Try numeric comparison first
-			leftNum, rightNum, err := tryNumericComparison(left, right)
-			if err == nil {
-				// Both values are numeric, compare them as float64
-				return leftNum != rightNum, nil
-			}
-			// Fall back to direct comparison
-			return left != right, nil
-		case ">":
-			shouldReturn, result, err := greaterThanComparison(left, right)
-			if shouldReturn {
-				return result, err
-			}
-			return false, nil
-		case ">=":
-			shouldReturn, result, err := greaterThanOrEqualComparison(left, right)
-			if shouldReturn {
-				return result, err
-			}
-			return false, nil
-		case "<":
-			shouldReturn, result, err := lessThanComparison(left, right)
-			if shouldReturn {
-				return result, err
-			}
-			return false, nil
-		case "<=":
-			shouldReturn, result, err := lessThanOrEqualComparison(left, right)
-			if shouldReturn {
-				return result, err
-			}
-			return false, nil
-		case "AND":
-			return left.(bool) && right.(bool), nil
-		case "OR":
-			return left.(bool) || right.(bool), nil
-		default:
-			return nil, fmt.Errorf("unsupported operator: %s", expr.Op)
-		}
-	default:
-		return nil, fmt.Errorf("unsupported expression type: %T", expr)
-	}
-}
-
-func (e *Evaluator) selectData(tableName string, fields []string, where ast.Expression) (*database.QueryResult, error) {
-	return e.operations.ReadRows(tableName, fields, e.filter(where), where)
-}
-
-func (e *Evaluator) insertData(tableName string, fields []string, values [][]ast.Expression) (any, error) {
-	data := [][]any{}
-	for _, value := range values {
-		row := make([]any, len(fields))
-		for i := range fields {
-			if i < len(value) {
-				row[i] = value[i].GetValue()
-			} else {
-				row[i] = nil
-			}
-		}
-		data = append(data, row)
-	}
-
-	err := e.operations.WriteRows(tableName, data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to write table: %w", err)
-	}
-
-	return "Insert successful", nil
-}
-
-func (e *Evaluator) executeUpdate(stmt *ast.UpdateStatement) (any, error) {
-	data, err := buildUpdateData(stmt.Values)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build update data: %w", err)
-	}
-
-	logger.Debug("Executing UPDATE statement on table: %s", stmt.TableName)
-	err = e.operations.UpdateRows(stmt.TableName, data, e.filter(stmt.Where))
-	if err != nil {
-		return nil, fmt.Errorf("failed to update table: %w", err)
-	}
-
-	return "Update successful", nil
-}
-
 func (e *Evaluator) createTable(stmt *ast.CreateTableStatement) (any, error) {
 	metadata := database.TableMetadata{
 		Name:        stmt.TableName,
@@ -422,52 +249,16 @@ func (e *Evaluator) createTable(stmt *ast.CreateTableStatement) (any, error) {
 		ForeignKeys: stmt.ForeignKeys,
 	}
 
-	err := e.operations.CreateTable(metadata)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create table: %w", err)
+	operation := ops.Operation{
+		Metadata: metadata,
+	}
+
+	result := e.operations.CreateTable(&operation)
+	if result.Err != nil {
+		return nil, fmt.Errorf("failed to create table: %w", result.Err)
 	}
 
 	return "Create table successful", nil
-}
-
-func (e *Evaluator) deleteData(tableName string, where ast.Expression) (any, error) {
-	filter := func(row []any, columns []database.Column) (bool, error) {
-		if where == nil {
-			return true, nil
-		}
-		matches, err := e.Evaluate(where, row, columns)
-		if err != nil {
-			return false, err
-		}
-		return matches.(bool), nil
-	}
-
-	deletedCount, err := e.operations.DeleteRows(tableName, filter)
-	if err != nil {
-		return nil, fmt.Errorf("failed to delete rows: %w", err)
-	}
-
-	if deletedCount == 0 {
-		return "No rows deleted", nil
-	}
-	return fmt.Sprintf("%d row(s) deleted", deletedCount), nil
-}
-
-func (e *Evaluator) dropTable(tableName string) (any, error) {
-	err := e.operations.DropTable(tableName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to drop table: %w", err)
-	}
-
-	return "Drop table successful", nil
-}
-
-func (e *Evaluator) describeTable(tableName string) (any, error) {
-	metadata, err := e.operations.ReadMetadata(tableName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read metadata: %w", err)
-	}
-	return metadata, nil
 }
 
 func (e *Evaluator) executeCreateIndex(stmt *ast.CreateIndexStatement) (any, error) {
@@ -529,90 +320,4 @@ func (e *Evaluator) executeAlterTable(stmt *ast.AlterTableStatement) (any, error
 	}
 
 	return nil, nil
-}
-
-func (e *Evaluator) filter(where ast.Expression) func(row []any, columns []database.Column) (bool, error) {
-	return func(row []any, columns []database.Column) (bool, error) {
-		if where == nil {
-			return true, nil
-		}
-
-		matches, err := e.Evaluate(where, row, columns)
-		if err != nil {
-			return false, err
-		}
-		return matches.(bool), nil
-	}
-}
-
-func buildUpdateData(values []ast.Expression) (map[string]any, error) {
-	data := make(map[string]any)
-	for _, value := range values {
-		valueExpression := value.(*ast.AssignmentExpression)
-		if valueExpression.Op != ASSIGN {
-			return nil, fmt.Errorf("unsupported operator: %s", valueExpression.Op)
-		}
-		data[valueExpression.Left.(*ast.Identifier).Value] = valueExpression.Right.GetValue()
-	}
-
-	return data, nil
-}
-
-func convertTokenTypeToColumnType(tokenType TokenType) (database.ColumnType, error) {
-	switch tokenType {
-	case INT:
-		return database.TypeInteger64, nil
-	case FLOAT:
-		return database.TypeFloat64, nil
-	case STRING:
-		return database.TypeString, nil
-	case BOOL:
-		return database.TypeBoolean, nil
-	case DATETIME:
-		return database.TypeDatetime, nil
-	}
-
-	return 0, fmt.Errorf("unsupported token type: %s", tokenType)
-}
-
-func convertToNumeric(left, right any) (float64, float64, error) {
-	var leftNum, rightNum float64
-
-	switch l := left.(type) {
-	case int:
-		leftNum = float64(l)
-	case int32:
-		leftNum = float64(l)
-	case int64:
-		leftNum = float64(l)
-	case float32:
-		leftNum = float64(l)
-	case float64:
-		leftNum = l
-	default:
-		return 0, 0, fmt.Errorf("left operand is not a number: %v (%T)", left, left)
-	}
-
-	switch r := right.(type) {
-	case int:
-		rightNum = float64(r)
-	case int32:
-		rightNum = float64(r)
-	case int64:
-		rightNum = float64(r)
-	case float32:
-		rightNum = float64(r)
-	case float64:
-		rightNum = r
-	default:
-		return 0, 0, fmt.Errorf("right operand is not a number: %v (%T)", right, right)
-	}
-
-	return leftNum, rightNum, nil
-}
-
-// tryNumericComparison attempts to convert two values to float64 for comparison
-// If either value is not a number, it returns an error
-func tryNumericComparison(left, right any) (float64, float64, error) {
-	return convertToNumeric(left, right)
 }
