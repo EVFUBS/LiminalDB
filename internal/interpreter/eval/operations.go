@@ -8,7 +8,13 @@ import (
 )
 
 func (e *Evaluator) selectData(tableName string, fields []string, where ast.Expression) (*database.QueryResult, error) {
-	return e.operations.ReadRows(tableName, fields, e.filter(where), where)
+	result := e.operations.ReadRows(&ops.Operation{TableName: tableName, Fields: fields, Where: where, Filter: e.filter(where)})
+
+	if result.Err != nil {
+		return nil, fmt.Errorf("failed to read rows: %w", result.Err)
+	}
+
+	return result.Data, nil
 }
 
 func (e *Evaluator) insertData(tableName string, fields []string, values [][]ast.Expression) (any, error) {
@@ -25,9 +31,9 @@ func (e *Evaluator) insertData(tableName string, fields []string, values [][]ast
 		data = append(data, row)
 	}
 
-	err := e.operations.WriteRows(tableName, data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to write table: %w", err)
+	result := e.operations.WriteRows(&ops.Operation{TableName: tableName, Data: ops.Data{Insert: data}})
+	if result.Err != nil {
+		return nil, fmt.Errorf("failed to write table: %w", result.Err)
 	}
 
 	return "Insert successful", nil
@@ -45,15 +51,15 @@ func (e *Evaluator) deleteData(tableName string, where ast.Expression) (any, err
 		return matches.(bool), nil
 	}
 
-	deletedCount, err := e.operations.DeleteRows(tableName, filter)
-	if err != nil {
-		return nil, fmt.Errorf("failed to delete rows: %w", err)
+	result := e.operations.DeleteRows(&ops.Operation{TableName: tableName, Filter: filter})
+	if result.Err != nil {
+		return nil, fmt.Errorf("failed to delete rows: %w", result.Err)
 	}
 
-	if deletedCount == 0 {
+	if result.RowsAffected == 0 {
 		return "No rows deleted", nil
 	}
-	return fmt.Sprintf("%d row(s) deleted", deletedCount), nil
+	return fmt.Sprintf("%d row(s) deleted", result.RowsAffected), nil
 }
 
 func (e *Evaluator) dropTable(tableName string) (any, error) {
@@ -66,9 +72,9 @@ func (e *Evaluator) dropTable(tableName string) (any, error) {
 }
 
 func (e *Evaluator) describeTable(tableName string) (any, error) {
-	metadata, err := e.operations.ReadMetadata(tableName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read metadata: %w", err)
+	result := e.operations.ReadMetadata(&ops.Operation{TableName: tableName})
+	if result.Err != nil {
+		return nil, fmt.Errorf("failed to read metadata: %w", result.Err)
 	}
-	return metadata, nil
+	return result.Metadata, nil
 }

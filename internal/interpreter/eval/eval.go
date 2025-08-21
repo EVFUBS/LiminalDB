@@ -10,13 +10,13 @@ import (
 
 type Evaluator struct {
 	parser     *p.Parser
-	operations operations.Operations
+	operations *operations.OperationsImpl
 }
 
 func NewEvaluator(parser *p.Parser) *Evaluator {
 	return &Evaluator{
 		parser:     parser,
-		operations: &operations.OperationsImpl{},
+		operations: operations.NewOperationsImpl(),
 	}
 }
 
@@ -42,5 +42,3 @@ func (e *Evaluator) Execute(query string) (any, error) {
 	logger.Debug("Query executed successfully")
 	return result, nil
 }
-
-

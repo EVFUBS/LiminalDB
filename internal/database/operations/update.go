@@ -4,30 +4,30 @@ import (
 	"LiminalDb/internal/database"
 )
 
-func (o *OperationsImpl) UpdateRows(tableName string, data map[string]any, filter Filter) error {
-	table, err := o.Serializer.ReadTableFromFile(tableName)
+func (o *OperationsImpl) UpdateRows(op *Operation) *Result {
+	table, err := o.Serializer.ReadTableFromFile(op.TableName)
 	if err != nil {
-		return err
+		return &Result{Err: err}
 	}
 
-	rows, err := rowsToUpdate(table, filter)
+	rows, err := rowsToUpdate(table, op.Filter)
 	if err != nil {
-		return err
+		return &Result{Err: err}
 	}
 
-	updatedRows, err := o.updateRows(table, rows, data)
+	updatedRows, err := o.updateRows(table, rows, op.Data.Update)
 	if err != nil {
-		return err
+		return &Result{Err: err}
 	}
 
 	err = o.UpdateTableWithRows(table, updatedRows)
 	if err != nil {
-		return err
+		return &Result{Err: err}
 	}
 
 	// TODO: Update indexes after the index rework
 
-	return nil
+	return &Result{}
 }
 
 func rowsToUpdate(table *database.Table, filter Filter) ([][]any, error) {
@@ -66,10 +66,11 @@ func (o *OperationsImpl) UpdateTableWithRows(table *database.Table, rows [][]any
 		return err
 	}
 
-	for _, tableRow := range table.Data {
-		for i, row := range rows {
+	// For each table row, find matching updated row by primary key and replace
+	for tIdx, tableRow := range table.Data {
+		for _, row := range rows {
 			if tableRow[primaryKeyIndex] == row[primaryKeyIndex] {
-				table.Data[i] = row
+				table.Data[tIdx] = row
 				break
 			}
 		}

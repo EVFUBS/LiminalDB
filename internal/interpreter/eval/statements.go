@@ -69,9 +69,9 @@ func (e *Evaluator) executeUpdate(stmt *ast.UpdateStatement) (any, error) {
 	}
 
 	logger.Debug("Executing UPDATE statement on table: %s", stmt.TableName)
-	err = e.operations.UpdateRows(stmt.TableName, data, e.filter(stmt.Where))
-	if err != nil {
-		return nil, fmt.Errorf("failed to update table: %w", err)
+	result := e.operations.UpdateRows(&ops.Operation{TableName: stmt.TableName, Data: ops.Data{Update: data}, Filter: e.filter(stmt.Where)})
+	if result.Err != nil {
+		return nil, fmt.Errorf("failed to update table: %w", result.Err)
 	}
 
 	return "Update successful", nil
@@ -264,7 +264,15 @@ func (e *Evaluator) createTable(stmt *ast.CreateTableStatement) (any, error) {
 func (e *Evaluator) executeCreateIndex(stmt *ast.CreateIndexStatement) (any, error) {
 	logger.Debug("Executing CREATE INDEX statement for index: %s on table: %s", stmt.IndexName, stmt.TableName)
 
-	err := e.operations.CreateIndex(stmt.TableName, stmt.IndexName, stmt.Columns, stmt.IsUnique)
+	operation := &ops.Operation{
+		TableName:   stmt.TableName,
+		IndexName:   stmt.IndexName,
+		ColumnNames: stmt.Columns,
+		IsUnique:    stmt.IsUnique,
+	}
+
+	err := e.operations.CreateIndex(operation)
+
 	if err != nil {
 		logger.Error("Failed to execute CREATE INDEX statement: %v", err)
 		return nil, fmt.Errorf("failed to create index: %w", err)
@@ -277,7 +285,12 @@ func (e *Evaluator) executeCreateIndex(stmt *ast.CreateIndexStatement) (any, err
 func (e *Evaluator) executeDropIndex(stmt *ast.DropIndexStatement) (any, error) {
 	logger.Debug("Executing DROP INDEX statement for index: %s on table: %s", stmt.IndexName, stmt.TableName)
 
-	err := e.operations.DropIndex(stmt.TableName, stmt.IndexName)
+	operation := &ops.Operation{
+		TableName: stmt.TableName,
+		IndexName: stmt.IndexName,
+	}
+
+	err := e.operations.DropIndex(operation)
 	if err != nil {
 		logger.Error("Failed to execute DROP INDEX statement: %v", err)
 		return nil, fmt.Errorf("failed to drop index: %w", err)
@@ -290,32 +303,48 @@ func (e *Evaluator) executeDropIndex(stmt *ast.DropIndexStatement) (any, error) 
 func (e *Evaluator) executeShowIndexes(stmt *ast.ShowIndexesStatement) (any, error) {
 	logger.Debug("Executing SHOW INDEXES statement for table: %s", stmt.TableName)
 
-	indexes, err := e.operations.ListIndexes(stmt.TableName)
-	if err != nil {
-		logger.Error("Failed to execute SHOW INDEXES statement: %v", err)
-		return nil, fmt.Errorf("failed to list indexes: %w", err)
+	operation := &ops.Operation{
+		TableName: stmt.TableName,
+	}
+
+	result := e.operations.ListIndexes(operation)
+	if result.Err != nil {
+		logger.Error("Failed to execute SHOW INDEXES statement: %v", result.Err)
+		return nil, fmt.Errorf("failed to list indexes: %w", result.Err)
 	}
 
 	logger.Debug("SHOW INDEXES statement executed successfully")
-	return indexes, nil
+	return result.IndexMetaData, nil
 }
 
 func (e *Evaluator) executeAlterTable(stmt *ast.AlterTableStatement) (any, error) {
 	logger.Debug("Executing ALTER TABLE statement for table: %s", stmt.TableName)
 
 	if stmt.DropConstraint {
-		err := e.operations.DropConstraint(stmt.TableName, stmt.ConstraintName)
-		if err != nil {
-			logger.Error("Failed to execute DROP CONSTRAINT statement: %v", err)
-			return nil, fmt.Errorf("failed to drop constraint: %w", err)
+		operation := &ops.Operation{
+			TableName:      stmt.TableName,
+			ConstraintName: stmt.ConstraintName,
+		}
+
+		logger.Debug("Dropping constraint: %s from table: %s", stmt.ConstraintName, stmt.TableName)
+		result := e.operations.DropConstraint(operation)
+
+		if result.Err != nil {
+			logger.Error("Failed to execute DROP CONSTRAINT statement: %v", result.Err)
+			return nil, fmt.Errorf("failed to drop constraint: %w", result.Err)
 		}
 	}
 
 	if stmt.AddColumn {
-		err := e.operations.AddColumnsToTable(stmt.TableName, stmt.Columns)
-		if err != nil {
-			logger.Error("Failed to execute ADD CONSTRAINT statement: %v", err)
-			return nil, fmt.Errorf("failed to add constraint: %w", err)
+		operation := &ops.Operation{
+			TableName: stmt.TableName,
+			Columns:   stmt.Columns,
+		}
+
+		result := e.operations.AddColumnsToTable(operation)
+		if result.Err != nil {
+			logger.Error("Failed to execute ADD CONSTRAINT statement: %v", result.Err)
+			return nil, fmt.Errorf("failed to add constraint: %w", result.Err)
 		}
 	}
 

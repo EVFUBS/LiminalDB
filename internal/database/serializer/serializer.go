@@ -35,6 +35,10 @@ type Serializer interface {
 
 type BinarySerializer struct{}
 
+func NewBinarySerializer() *BinarySerializer {
+	return &BinarySerializer{}
+}
+
 func (b BinarySerializer) writeData(buf *bytes.Buffer, data any) error {
 	return binary.Write(buf, binary.LittleEndian, data)
 }

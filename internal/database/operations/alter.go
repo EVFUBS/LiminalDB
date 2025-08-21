@@ -1,17 +1,16 @@
 package operations
 
 import (
-	"LiminalDb/internal/database"
 	"fmt"
 )
 
-func (o *OperationsImpl) AddColumnsToTable(tableName string, columns []database.Column) error {
-	table, err := o.Serializer.ReadTableFromFile(tableName)
+func (o *OperationsImpl) AddColumnsToTable(op *Operation) *Result {
+	table, err := o.Serializer.ReadTableFromFile(op.TableName)
 	if err != nil {
-		return err
+		return &Result{Err: err}
 	}
 
-	for _, newCol := range columns {
+	for _, newCol := range op.Columns {
 		if len(table.Data) == 0 {
 			table.Metadata.Columns = append(table.Metadata.Columns, newCol)
 			continue
@@ -25,7 +24,7 @@ func (o *OperationsImpl) AddColumnsToTable(tableName string, columns []database.
 				}
 				continue
 			} else {
-				return fmt.Errorf("column %s requires a default value or must be nullable for non-empty table", newCol.Name)
+				return &Result{Err: fmt.Errorf("column %s requires a default value or must be nullable for non-empty table", newCol.Name)}
 			}
 		}
 
@@ -35,9 +34,9 @@ func (o *OperationsImpl) AddColumnsToTable(tableName string, columns []database.
 		}
 	}
 
-	if err := o.Serializer.WriteTableToFile(table, tableName); err != nil {
-		return err
+	if err := o.Serializer.WriteTableToFile(table, op.TableName); err != nil {
+		return &Result{Err: err}
 	}
 
-	return nil
+	return &Result{}
 }

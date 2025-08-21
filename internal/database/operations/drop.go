@@ -39,26 +39,26 @@ func (o *OperationsImpl) DropTable(op *Operation) *Result {
 	return &Result{}
 }
 
-func (o *OperationsImpl) DropConstraint(tableName string, constraintName string) error {
-	logger.Info("Dropping constraint: %s", constraintName)
+func (o *OperationsImpl) DropConstraint(op *Operation) *Result {
+	logger.Info("Dropping constraint: %s", op.ConstraintName)
 
-	table, err := o.Serializer.ReadTableFromFile(tableName)
+	table, err := o.Serializer.ReadTableFromFile(op.TableName)
 	if err != nil {
-		logger.Error("Failed to read table %s: %v", tableName, err)
-		return err
+		logger.Error("Failed to read table %s: %v", op.TableName, err)
+		return &Result{Err: err}
 	}
 
 	for i := len(table.Metadata.ForeignKeys) - 1; i >= 0; i-- {
-		if table.Metadata.ForeignKeys[i].Name == constraintName {
+		if table.Metadata.ForeignKeys[i].Name == op.ConstraintName {
 			table.Metadata.ForeignKeys = append(table.Metadata.ForeignKeys[:i], table.Metadata.ForeignKeys[i+1:]...)
 		}
 	}
 
-	if err := o.Serializer.WriteTableToFile(table, tableName); err != nil {
+	if err := o.Serializer.WriteTableToFile(table, op.TableName); err != nil {
 		logger.Error("Failed to save table after dropping constraint: %v", err)
-		return err
+		return &Result{Err: err}
 	}
 
-	logger.Info("Constraint %s dropped successfully from table %s", constraintName, tableName)
-	return nil
+	logger.Info("Constraint %s dropped successfully from table %s", op.ConstraintName, op.TableName)
+	return &Result{}
 }

@@ -27,62 +27,65 @@ type IndexQuery struct {
 	IndexKey      any
 }
 
-func test() {
-}
+func (o *OperationsImpl) ReadMetadata(op *Operation) *Result {
+	logger.Debug("Reading metadata for table: %s", op.TableName)
 
-func (o *OperationsImpl) ReadMetadata(filename string) (database.TableMetadata, error) {
-	logger.Debug("Reading metadata for table: %s", filename)
-
-	table, err := o.Serializer.ReadTableFromFile(filename)
+	table, err := o.Serializer.ReadTableFromFile(op.TableName)
 	if err != nil {
-		logger.Error("Failed to read metadata for table %s: %v", filename, err)
-		return database.TableMetadata{}, err
+		logger.Error("Failed to read metadata for table %s: %v", op.TableName, err)
+		return &Result{Err: err}
 	}
 
-	logger.Debug("Successfully read metadata for table %s", filename)
-	return table.Metadata, nil
+	logger.Debug("Successfully read metadata for table %s", op.TableName)
+	return &Result{Metadata: &table.Metadata}
 }
 
-func (o *OperationsImpl) ReadRows(tableName string, columns []string, filter Filter, where ast.Expression) (*database.QueryResult, error) {
-	logger.Debug("Reading rows from table: %s", tableName)
+func (o *OperationsImpl) ReadRows(op *Operation) *Result {
+	logger.Debug("Reading rows from table: %s", op.TableName)
 
-	table, err := o.Serializer.ReadTableFromFile(tableName)
+	table, err := o.Serializer.ReadTableFromFile(op.TableName)
 	if err != nil {
-		logger.Error("Failed to read rows from table %s: %v", tableName, err)
-		return &database.QueryResult{}, err
+		logger.Error("Failed to read rows from table %s: %v", op.TableName, err)
+		return &Result{Err: err}
 	}
 
-	result := BuildResultWithFilteredColumns(columns, table.Metadata.Columns)
+	// this needs to be unified
+	columnsToUse := op.Fields
+	if len(columnsToUse) == 0 {
+		columnsToUse = op.ColumnNames
+	}
+
+	result := BuildResultWithFilteredColumns(columnsToUse, table.Metadata.Columns)
 
 	indexResult, err := o.ReadRowsUsingIndex(&IndexQuery{
 		Table:         table,
-		TableName:     tableName,
-		Fields:        columns,
+		TableName:     op.TableName,
+		Fields:        columnsToUse,
 		Result:        result,
-		Filter:        filter,
+		Filter:        op.Filter,
 		Index:         nil,
 		IndexMetaData: nil,
 		IndexKey:      nil,
-	}, where)
+	}, op.Where)
 	if err != nil {
 		logger.Error("Failed to read rows using index: %v", err)
-		return nil, err
+		return &Result{Err: err}
 	}
 
 	if indexResult != nil {
-		return indexResult, nil
+		return &Result{Data: indexResult}
 	}
 
-	logger.Debug("No suitable index found for query on table %s", tableName)
+	logger.Debug("No suitable index found for query on table %s", op.TableName)
 
-	result, err = o.ReadRowsFullScan(table, columns, filter, result)
+	result, err = o.ReadRowsFullScan(table, columnsToUse, op.Filter, result)
 	if err != nil {
 		logger.Error("Failed to perform full table scan: %v", err)
-		return nil, err
+		return &Result{Err: err}
 	}
 
-	logger.Debug("Successfully read %d rows from table %s", len(result.Rows), tableName)
-	return result, nil
+	logger.Debug("Successfully read %d rows from table %s", len(result.Rows), op.TableName)
+	return &Result{Data: result}
 }
 
 func (o *OperationsImpl) ReadRowsFullScan(table *database.Table, columns []string, filter Filter, result *database.QueryResult) (*database.QueryResult, error) {

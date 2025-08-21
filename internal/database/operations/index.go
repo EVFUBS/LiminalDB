@@ -125,22 +125,22 @@ func findUniqueIndex(candidates []candidateIndex) *candidateIndex {
 	return nil
 }
 
-func (o *OperationsImpl) CreateIndex(tableName string, indexName string, columns []string, isUnique bool) error {
-	logger.Info("Creating index %s on table %s", indexName, tableName)
+func (o *OperationsImpl) CreateIndex(op *Operation) error {
+	logger.Info("Creating index %s on table %s", op.IndexName, op.TableName)
 
-	table, err := o.Serializer.ReadTableFromFile(tableName)
+	table, err := o.Serializer.ReadTableFromFile(op.TableName)
 	if err != nil {
-		logger.Error("Failed to read table %s: %v", tableName, err)
+		logger.Error("Failed to read table %s: %v", op.TableName, err)
 		return err
 	}
 
 	for _, idx := range table.Metadata.Indexes {
-		if idx.Name == indexName {
-			return fmt.Errorf("index %s already exists on table %s", indexName, tableName)
+		if idx.Name == op.IndexName {
+			return fmt.Errorf("index %s already exists on table %s", op.IndexName, op.TableName)
 		}
 	}
 
-	for _, col := range columns {
+	for _, col := range op.ColumnNames {
 		found := false
 		for _, tableCol := range table.Metadata.Columns {
 			if tableCol.Name == col {
@@ -149,14 +149,14 @@ func (o *OperationsImpl) CreateIndex(tableName string, indexName string, columns
 			}
 		}
 		if !found {
-			return fmt.Errorf("column %s not found in table %s", col, tableName)
+			return fmt.Errorf("column %s not found in table %s", col, op.TableName)
 		}
 	}
 
 	isPrimary := false
-	if len(columns) == 1 {
+	if len(op.Columns) == 1 {
 		for _, col := range table.Metadata.Columns {
-			if col.Name == columns[0] && col.IsPrimaryKey {
+			if col.Name == op.ColumnNames[0] && col.IsPrimaryKey {
 				isPrimary = true
 				break
 			}
@@ -164,27 +164,27 @@ func (o *OperationsImpl) CreateIndex(tableName string, indexName string, columns
 	}
 
 	indexMetadata := database.IndexMetadata{
-		Name:      indexName,
-		Columns:   columns,
-		IsUnique:  isUnique,
+		Name:      op.IndexName,
+		Columns:   op.ColumnNames,
+		IsUnique:  op.IsUnique,
 		IsPrimary: isPrimary,
 	}
 
 	table.Metadata.Indexes = append(table.Metadata.Indexes, indexMetadata)
 
-	index := indexing.NewIndex(indexName, tableName, columns, isUnique)
+	index := indexing.NewIndex(op.IndexName, op.TableName, op.ColumnNames, op.IsUnique)
 
-	err = o.insertIndexIntoTree(table, index, columns)
+	err = o.insertIndexIntoTree(table, index, op.ColumnNames)
 	if err != nil {
 		return err
 	}
 
-	err = o.SaveIndexToFile(index, tableName, indexName)
+	err = o.SaveIndexToFile(index, op.TableName, op.IndexName)
 	if err != nil {
 		return err
 	}
 
-	return o.Serializer.WriteTableToFile(table, tableName)
+	return o.Serializer.WriteTableToFile(table, op.TableName)
 }
 
 func (o *OperationsImpl) SaveIndexToFile(index *indexing.Index, tableName string, indexName string) error {
@@ -201,20 +201,20 @@ func (o *OperationsImpl) SaveIndexToFile(index *indexing.Index, tableName string
 	return nil
 }
 
-func (o *OperationsImpl) DropIndex(tableName string, indexName string) error {
-	logger.Info("Dropping index %s from table %s", indexName, tableName)
+func (o *OperationsImpl) DropIndex(op *Operation) *Result {
+	logger.Info("Dropping index %s from table %s", op.IndexName, op.TableName)
 
-	table, err := o.Serializer.ReadTableFromFile(tableName)
+	table, err := o.Serializer.ReadTableFromFile(op.TableName)
 	if err != nil {
-		logger.Error("Failed to read table %s: %v", tableName, err)
-		return err
+		logger.Error("Failed to read table %s: %v", op.TableName, err)
+		return &Result{Err: err}
 	}
 
 	indexFound := false
 	for i, idx := range table.Metadata.Indexes {
-		if idx.Name == indexName {
+		if idx.Name == op.IndexName {
 			if idx.IsPrimary {
-				return fmt.Errorf("cannot drop primary key index")
+				return &Result{Err: fmt.Errorf("cannot drop primary key index")}
 			}
 
 			table.Metadata.Indexes = append(table.Metadata.Indexes[:i], table.Metadata.Indexes[i+1:]...)
@@ -224,27 +224,32 @@ func (o *OperationsImpl) DropIndex(tableName string, indexName string) error {
 	}
 
 	if !indexFound {
-		return fmt.Errorf("index %s not found on table %s", indexName, tableName)
+		return &Result{Err: fmt.Errorf("index %s not found on table %s", op.IndexName, op.TableName)}
 	}
 
-	indexFilePath := getIndexFilePath(tableName, indexName)
+	indexFilePath := getIndexFilePath(op.TableName, op.IndexName)
 	if err := os.Remove(indexFilePath); err != nil && !os.IsNotExist(err) {
-		return err
+		return &Result{Err: err}
 	}
 
-	return o.Serializer.WriteTableToFile(table, tableName)
+	err = o.Serializer.WriteTableToFile(table, op.TableName)
+	if err != nil {
+		return &Result{Err: err}
+	}
+
+	return &Result{}
 }
 
-func (o *OperationsImpl) ListIndexes(tableName string) ([]database.IndexMetadata, error) {
-	logger.Debug("Listing indexes for table %s", tableName)
+func (o *OperationsImpl) ListIndexes(op *Operation) Result {
+	logger.Debug("Listing indexes for table %s", op.TableName)
 
-	table, err := o.Serializer.ReadTableFromFile(tableName)
+	table, err := o.Serializer.ReadTableFromFile(op.TableName)
 	if err != nil {
-		logger.Error("Failed to read table %s: %v", tableName, err)
-		return nil, err
+		logger.Error("Failed to read table %s: %v", op.TableName, err)
+		return Result{Err: err}
 	}
 
-	return table.Metadata.Indexes, nil
+	return Result{IndexMetaData: table.Metadata.Indexes}
 }
 
 func (o *OperationsImpl) loadIndex(tableName string, indexName string) (*indexing.Index, error) {

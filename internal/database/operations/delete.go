@@ -8,27 +8,27 @@ import (
 	"os"
 )
 
-func (o *OperationsImpl) DeleteRows(tableName string, filter Filter) (int64, error) {
-	logger.Info("Deleting rows from table: %s", tableName)
+func (o *OperationsImpl) DeleteRows(op *Operation) *Result {
+	logger.Info("Deleting rows from table: %s", op.TableName)
 
-	table, err := o.Serializer.ReadTableFromFile(tableName)
+	table, err := o.Serializer.ReadTableFromFile(op.TableName)
 	if err != nil {
-		return 0, err
+		return &Result{Err: err}
 	}
 
-	rowsToDelete, err := o.DetermineRowsToDelete(table, filter)
+	rowsToDelete, err := o.DetermineRowsToDelete(table, op.Filter)
 	if err != nil {
-		return 0, err
+		return &Result{Err: err}
 	}
 
 	err = o.deleteRowForeignKeyCheck(table, rowsToDelete)
 	if err != nil {
-		return 0, err
+		return &Result{Err: err}
 	}
 
 	indexes := make(map[string]*indexing.Index)
 	for _, idx := range table.Metadata.Indexes {
-		index, err := o.loadIndex(tableName, idx.Name)
+		index, err := o.loadIndex(op.TableName, idx.Name)
 		if err != nil {
 			logger.Error("Failed to load index %s: %v", idx.Name, err)
 			continue
@@ -68,7 +68,7 @@ func (o *OperationsImpl) DeleteRows(tableName string, filter Filter) (int64, err
 		table.Data = newData
 
 		for idxName, idx := range indexes {
-			newIndex := indexing.NewIndex(idx.Name, tableName, idx.Columns, idx.IsUnique)
+			newIndex := indexing.NewIndex(idx.Name, op.TableName, idx.Columns, idx.IsUnique)
 
 			for _, newRowID := range newRowIDs {
 				for _, idxMeta := range table.Metadata.Indexes {
@@ -92,20 +92,20 @@ func (o *OperationsImpl) DeleteRows(tableName string, filter Filter) (int64, err
 				continue
 			}
 
-			indexFilePath := getIndexFilePath(tableName, idxName)
+			indexFilePath := getIndexFilePath(op.TableName, idxName)
 			if err := os.WriteFile(indexFilePath, indexBytes, 0666); err != nil {
 				logger.Error("Failed to write index file %s: %v", indexFilePath, err)
 			}
 		}
 
-		err = o.Serializer.WriteTableToFile(table, tableName)
+		err = o.Serializer.WriteTableToFile(table, op.TableName)
 		if err != nil {
-			return 0, fmt.Errorf("failed to write updated table: %w", err)
+			return &Result{Err: fmt.Errorf("failed to write updated table: %w", err)}
 		}
 	}
 
-	logger.Info("Successfully deleted %d rows from table %s", deletedCount, tableName)
-	return deletedCount, nil
+	logger.Info("Successfully deleted %d rows from table %s", deletedCount, op.TableName)
+	return &Result{RowsAffected: deletedCount}
 }
 
 func (o *OperationsImpl) DetermineRowsToDelete(table *database.Table, filter func([]any, []database.Column) (bool, error)) ([]bool, error) {
