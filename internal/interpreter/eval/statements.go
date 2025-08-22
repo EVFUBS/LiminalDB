@@ -290,10 +290,10 @@ func (e *Evaluator) executeDropIndex(stmt *ast.DropIndexStatement) (any, error) 
 		IndexName: stmt.IndexName,
 	}
 
-	err := e.operations.DropIndex(operation)
-	if err != nil {
-		logger.Error("Failed to execute DROP INDEX statement: %v", err)
-		return nil, fmt.Errorf("failed to drop index: %w", err)
+	result := e.operations.DropIndex(operation)
+	if result.Err != nil {
+		logger.Error("Failed to execute DROP INDEX statement: %v", result.Err)
+		return nil, fmt.Errorf("failed to drop index: %w", result.Err)
 	}
 
 	logger.Debug("DROP INDEX statement executed successfully")

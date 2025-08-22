@@ -2,6 +2,7 @@ package transaction
 
 import (
 	"LiminalDb/internal/database/operations"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -56,7 +57,7 @@ func (tm *TransactionManager) AddChange(tx *Transaction, change Change) error {
 		lock := Lock{
 			ResourceID:    change.Operation.TableName, // TODO: Find a way to get the rows it needs as well
 			TransactionID: tx.ID,
-			Type:          Exclusive, // Need a way to determine if its a read or write lock
+			Type:          Exclusive, // TODO: Need a way to determine if its a read or write lock
 			Timestamp:     time.Now().Unix(),
 		}
 		tx.Locks[change.Operation.TableName] = lock
@@ -65,8 +66,11 @@ func (tm *TransactionManager) AddChange(tx *Transaction, change Change) error {
 	return nil
 }
 
-func (tm *TransactionManager) Commit(tx *Transaction) []operations.Result {
+func (tm *TransactionManager) Commit(tx *Transaction) ([]operations.Result, error) {
 	// if not active return error
+	if tx.Status != Active {
+		return nil, fmt.Errorf("commited transaction is not active, transaction: %s", tx.ID)
+	}
 
 	for _, lock := range tx.Locks {
 		tm.LockManager.requestLock(lock.ResourceID, lock, time.Now().Unix())
@@ -80,7 +84,7 @@ func (tm *TransactionManager) Commit(tx *Transaction) []operations.Result {
 			changeResult := change.execute(change.Operation)
 
 			if changeResult.Err != nil {
-				return []operations.Result{changeResult}
+				return nil, changeResult.Err
 			}
 
 			results = append(results, changeResult)
@@ -92,7 +96,7 @@ func (tm *TransactionManager) Commit(tx *Transaction) []operations.Result {
 	tx.Status = Committed
 	delete(tm.ActiveTransactions, tx.ID)
 
-	return results
+	return results, nil
 }
 
 func (tm *TransactionManager) Rollback(tx *Transaction) error {
