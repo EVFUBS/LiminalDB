@@ -1,8 +1,11 @@
 package transaction
 
 import (
-	"LiminalDb/internal/database/operations"
+	"LiminalDb/internal/ast"
+	db "LiminalDb/internal/database"
+	ops "LiminalDb/internal/database/operations"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +16,11 @@ type Status int
 const (
 	Active Status = iota
 	Committed
+	RolledBack
+)
+
+const (
+	TranTimeout = 60
 )
 
 func (s Status) String() string {
@@ -21,39 +29,56 @@ func (s Status) String() string {
 		return "active"
 	case Committed:
 		return "committed"
+	case RolledBack:
+		return "rolled back"
 	default:
 		return "unknown"
 	}
 }
 
 type Transaction struct {
-	ID      string
-	Status  Status
-	Changes []Change
-	Locks   map[string]Lock
+	ID        string
+	Status    Status
+	Changes   []Change
+	Locks     map[string]Lock
+	Timestamp int64
 }
 
 type TransactionManager struct {
+	mu                 sync.Mutex
 	ActiveTransactions map[string]*Transaction
 	LockManager        *LockManager
 }
 
-func (tm *TransactionManager) Begin() (*Transaction, error) {
-	tx := &Transaction{
-		ID:      uuid.NewString(),
-		Status:  Active,
-		Changes: []Change{},
-		Locks:   map[string]Lock{},
+func NewTransactionManager() *TransactionManager {
+	return &TransactionManager{
+		ActiveTransactions: make(map[string]*Transaction),
+		LockManager:        NewLockManager(),
 	}
+}
+
+func (tm *TransactionManager) Begin() *Transaction {
+	tx := &Transaction{
+		ID:        uuid.NewString(),
+		Status:    Active,
+		Changes:   []Change{},
+		Locks:     map[string]Lock{},
+		Timestamp: time.Now().Unix(),
+	}
+	tm.mu.Lock()
 	tm.ActiveTransactions[tx.ID] = tx
-	return tx, nil
+	tm.mu.Unlock()
+
+	return tx
 }
 
 func (tm *TransactionManager) AddChange(tx *Transaction, change Change) error {
+	tm.mu.Lock()
+	// append change and update active transactions under lock to avoid concurrent map writes
 	tx.Changes = append(tx.Changes, change)
 	tm.ActiveTransactions[tx.ID] = tx
-
-	if change.Operation.TableName != "" {
+	// TODO: Need a big figure out what needs to lock when certain stuff is done this is far to basic
+	if change.Operation.TableName != "" || change.Operation.Metadata.Name != "" {
 		lock := Lock{
 			ResourceID:    change.Operation.TableName, // TODO: Find a way to get the rows it needs as well
 			TransactionID: tx.ID,
@@ -62,12 +87,12 @@ func (tm *TransactionManager) AddChange(tx *Transaction, change Change) error {
 		}
 		tx.Locks[change.Operation.TableName] = lock
 	}
+	tm.mu.Unlock()
 
 	return nil
 }
 
-func (tm *TransactionManager) Commit(tx *Transaction) ([]operations.Result, error) {
-	// if not active return error
+func (tm *TransactionManager) Execute(tx *Transaction, execFunc func(ast.Statement) (any, error)) ([]any, error) {
 	if tx.Status != Active {
 		return nil, fmt.Errorf("commited transaction is not active, transaction: %s", tx.ID)
 	}
@@ -76,30 +101,150 @@ func (tm *TransactionManager) Commit(tx *Transaction) ([]operations.Result, erro
 		tm.LockManager.requestLock(lock.ResourceID, lock, time.Now().Unix())
 	}
 
-	var results []operations.Result
+	var results []any
+	var rollback bool
+	var commit bool
 	for _, change := range tx.Changes {
-		hasLock := tm.LockManager.checkLock(change.Operation.TableName, tx.Locks[change.Operation.TableName])
 
-		if hasLock {
-			changeResult := change.execute(change.Operation)
-
-			if changeResult.Err != nil {
-				return nil, changeResult.Err
-			}
-
-			results = append(results, changeResult)
+		if change.Rollback {
+			rollback = true
+			break
 		}
+
+		if change.Commit {
+			commit = true
+			break
+		}
+
+		for {
+			hasLock := tm.LockManager.checkLock(change.Operation.TableName, tx.Locks[change.Operation.TableName])
+			if hasLock {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+
+		changeResult, err := execFunc(change.Statement)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, changeResult)
 
 		tm.LockManager.releaseLock(change.Operation.TableName, tx.Locks[change.Operation.TableName])
 	}
 
-	tx.Status = Committed
-	delete(tm.ActiveTransactions, tx.ID)
+	tm.releaseLocksForTransaction(tx)
+
+	if rollback || !commit {
+		tm.Rollback(tx)
+		tx.Status = RolledBack
+	}
+
+	if commit {
+		tm.Commit(tx)
+		tx.Status = Committed
+	}
 
 	return results, nil
 }
 
-func (tm *TransactionManager) Rollback(tx *Transaction) error {
+// Commit - deletes the transaction from the active transactions map
+func (tm *TransactionManager) Commit(tx *Transaction) error {
+	// TODO: don't think we should delete this maybe
+	tm.mu.Lock()
 	delete(tm.ActiveTransactions, tx.ID)
+	tm.mu.Unlock()
 	return nil
+}
+
+// Rollback - rolls back the transaction by deleting it from the active transactions map and rolling back all changes
+func (tm *TransactionManager) Rollback(tx *Transaction) error {
+	op := ops.NewOperationsImpl()
+	for i := len(tx.Changes) - 1; i >= 0; i-- {
+		ch := tx.Changes[i]
+		if ch.Commit || ch.Rollback {
+			continue
+		}
+		switch s := ch.Statement.(type) {
+		case *ast.CreateTableStatement:
+			operation := &ops.Operation{TableName: s.TableName}
+			_ = op.DropTable(operation)
+		case *ast.InsertStatement:
+			rows := ch.Operation.Data.Insert
+			if len(rows) == 0 {
+				continue
+			}
+			filter := func(row []any, cols []db.Column) (bool, error) {
+				for _, ins := range rows {
+					if len(ins) != len(row) {
+						continue
+					}
+					equal := true
+					for i := range ins {
+						if row[i] != ins[i] {
+							equal = false
+							break
+						}
+					}
+					if equal {
+						return true, nil
+					}
+				}
+				return false, nil
+			}
+			_ = op.DeleteRows(&ops.Operation{TableName: s.TableName, Filter: filter})
+		}
+	}
+	tm.releaseLocksForTransaction(tx)
+	tm.mu.Lock()
+	delete(tm.ActiveTransactions, tx.ID)
+	tm.mu.Unlock()
+	return nil
+}
+
+// RollbackByID provides a safe way to rollback a transaction by its id.
+func (tm *TransactionManager) RollbackByID(txID string) error {
+	tm.mu.Lock()
+	tx, ok := tm.ActiveTransactions[txID]
+	tm.mu.Unlock()
+
+	if !ok {
+		return nil
+	}
+
+	return tm.Rollback(tx)
+}
+
+// ExpireTransactionAfterTimeout starts a background worker that periodically scans
+// ActiveTransactions for transactions whose last activity timestamp is older than
+// TranTimeout seconds. Expired transactions are rolled back via RollbackByID.
+func (tm *TransactionManager) ExpireTransactionAfterTimeout() {
+	go func() {
+		ticker := time.NewTicker(time.Second * TranTimeout)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			now := time.Now().Unix()
+
+			tm.mu.Lock()
+			var expired []string
+			for id, tx := range tm.ActiveTransactions {
+				if now-tx.Timestamp > int64(TranTimeout) {
+					expired = append(expired, id)
+				}
+			}
+			tm.mu.Unlock()
+
+			for _, id := range expired {
+				_ = tm.RollbackByID(id)
+			}
+		}
+	}()
+}
+
+// releaseLocksForTransaction releases all locks for a transaction
+func (tm *TransactionManager) releaseLocksForTransaction(tx *Transaction) {
+	for _, lock := range tx.Locks {
+		tm.LockManager.releaseLock(lock.ResourceID, lock)
+	}
 }

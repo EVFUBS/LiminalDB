@@ -1,14 +1,13 @@
 package transaction
 
 import (
-	ops "LiminalDb/internal/database/operations"
+	"LiminalDb/internal/ast"
+	"LiminalDb/internal/database/operations"
 )
 
 type Change struct {
-	Task      func(ops.Operation) ops.Result
-	Operation ops.Operation
-}
-
-func (c *Change) execute(op ops.Operation) ops.Result {
-	return c.Task(op)
+	Statement ast.Statement
+	Operation operations.Operation
+	Commit    bool
+	Rollback  bool
 }

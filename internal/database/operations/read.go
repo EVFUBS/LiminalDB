@@ -4,7 +4,6 @@ import (
 	"LiminalDb/internal/ast"
 	"LiminalDb/internal/database"
 	"LiminalDb/internal/database/indexing"
-	"LiminalDb/internal/logger"
 	"fmt"
 	"strings"
 )

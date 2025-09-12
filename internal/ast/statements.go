@@ -90,3 +90,13 @@ type AlterTableStatement struct {
 	DropIndex      bool
 	AddIndex       bool
 }
+
+type TransactionStatement struct {
+	Statements []Statement
+}
+
+type BeginStatement struct{}
+
+type CommitStatement struct{}
+
+type RollbackStatement struct{}

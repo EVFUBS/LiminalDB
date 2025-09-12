@@ -29,6 +29,8 @@ func (p *Parser) ParseStatement() (ast.Statement, error) {
 		return p.parseExecStatement()
 	case SHOW:
 		return p.parseShowStatement()
+	case BEGIN:
+		return p.parseTransactionStatement()
 	default:
 		p.peekError(p.curToken.Type)
 		return nil, fmt.Errorf("expected statement, got %s", p.curToken.Literal)
@@ -64,9 +66,9 @@ func (p *Parser) parseSelectStatement() (*ast.SelectStatement, error) {
 		stmt.Where = p.parseExpression()
 	}
 
-	if !p.expectPeek(SEMICOLON) && !p.expectPeek(EOF) {
-		return nil, fmt.Errorf("expected semicolon or eof, got %s", p.curToken.Literal)
-	}
+	// if !p.expectPeek(SEMICOLON) && !p.expectPeek(EOF) {
+	// 	return nil, fmt.Errorf("expected semicolon or eof, got %s", p.curToken.Literal)
+	// }
 
 	return stmt, nil
 }
@@ -128,9 +130,9 @@ func (p *Parser) parseUpdateStatement() (ast.Statement, error) {
 
 	stmt.Where = p.parseExpression()
 
-	if !p.expectPeek(SEMICOLON) && !p.expectPeek(EOF) {
-		return nil, fmt.Errorf("expected semicolon or eof, got %s", p.curToken.Literal)
-	}
+	// if !p.expectPeek(SEMICOLON) && !p.expectPeek(EOF) {
+	// 	return nil, fmt.Errorf("expected semicolon or eof, got %s", p.peekToken.Literal)
+	// }
 
 	return stmt, nil
 }
@@ -498,4 +500,53 @@ func (p *Parser) parseExecStatement() (*ast.ExecStatement, error) {
 	}
 
 	return stmt, nil
+}
+
+func (p *Parser) parseTransactionStatement() (*ast.TransactionStatement, error) {
+	stmts := &ast.TransactionStatement{}
+
+	if !p.expectPeek(TRAN) {
+		return nil, fmt.Errorf("expected TRAN, got %s", p.curToken.Literal)
+	}
+
+	p.NextToken()
+
+	stmts.Statements = []ast.Statement{}
+	beginStatement := &ast.BeginStatement{}
+	stmts.Statements = append(stmts.Statements, beginStatement)
+
+	for {
+		if p.curTokenIs(EOF) {
+			break
+		}
+
+		var stmt ast.Statement
+		switch p.curToken.Type {
+		case COMMIT:
+			stmt = &ast.CommitStatement{}
+		case ROLLBACK:
+			stmt = &ast.RollbackStatement{}
+		default:
+			var err error
+			stmt, err = p.ParseStatement()
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		if stmt != nil {
+			stmts.Statements = append(stmts.Statements, stmt)
+		}
+
+		p.NextToken()
+	}
+
+	lastStmt := stmts.Statements[len(stmts.Statements)-1]
+	if _, ok := lastStmt.(*ast.CommitStatement); !ok {
+		if _, ok := lastStmt.(*ast.RollbackStatement); !ok {
+			return nil, fmt.Errorf("transaction statement must end with COMMIT or ROLLBACK")
+		}
+	}
+
+	return stmts, nil
 }

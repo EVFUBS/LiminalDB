@@ -5,7 +5,6 @@ import (
 	"LiminalDb/internal/common"
 	"LiminalDb/internal/database"
 	"LiminalDb/internal/database/indexing"
-	"LiminalDb/internal/logger"
 	"fmt"
 	"os"
 )

@@ -5,32 +5,63 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
-)
-
-var (
-	InfoLogger  *log.Logger
-	ErrorLogger *log.Logger
-	DebugLogger *log.Logger
 )
 
 type LogLevel int
 
+type Logger struct {
+	logLevel LogLevel
+	logDir   string
+	logger   *log.Logger
+}
+
 const (
-	DEBUG LogLevel = iota
-	INFO
+	INFO LogLevel = iota
+	DEBUG
 	ERROR
 )
 
-func Init(logLevel LogLevel, logDir string) error {
-	if err := os.MkdirAll(logDir, 0755); err != nil {
+var (
+	registryMu sync.RWMutex
+	registry   = map[string]*Logger{}
+)
+
+func Get(name string) (logger *Logger) {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+
+	if ln, ok := registry[name]; ok {
+		return ln
+	}
+
+	return nil
+}
+
+func New(name string, logDir string, logLevel LogLevel) *Logger {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+
+	if logger, exists := registry[name]; exists {
+		return logger
+	}
+
+	logger := setupLogger(logLevel, logDir)
+
+	registry[name] = logger
+	return logger
+}
+
+func (l *Logger) init() error {
+	if err := os.MkdirAll(l.logDir, 0755); err != nil {
 		return fmt.Errorf("failed to create log directory: %v", err)
 	}
 
 	timestamp := time.Now().Format("2006-01-02")
 
-	infoFile, err := os.OpenFile(
-		filepath.Join(logDir, fmt.Sprintf("info-%s.log", timestamp)),
+	logFile, err := os.OpenFile(
+		filepath.Join(l.logDir, fmt.Sprintf("Liminal-%s.log", timestamp)),
 		os.O_APPEND|os.O_CREATE|os.O_WRONLY,
 		0644,
 	)
@@ -38,54 +69,46 @@ func Init(logLevel LogLevel, logDir string) error {
 		return fmt.Errorf("failed to open info log file: %v", err)
 	}
 
-	errorFile, err := os.OpenFile(
-		filepath.Join(logDir, fmt.Sprintf("error-%s.log", timestamp)),
-		os.O_APPEND|os.O_CREATE|os.O_WRONLY,
-		0644,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to open error log file: %v", err)
-	}
-
-	debugFile, err := os.OpenFile(
-		filepath.Join(logDir, fmt.Sprintf("debug-%s.log", timestamp)),
-		os.O_APPEND|os.O_CREATE|os.O_WRONLY,
-		0644,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to open debug log file: %v", err)
-	}
-
-	InfoLogger = log.New(infoFile, "INFO: ", log.Ldate|log.Ltime|log.Lshortfile)
-	ErrorLogger = log.New(errorFile, "ERROR: ", log.Ldate|log.Ltime|log.Lshortfile)
-	DebugLogger = log.New(debugFile, "DEBUG: ", log.Ldate|log.Ltime|log.Lshortfile)
-
-	if logLevel > INFO {
-		DebugLogger.SetOutput(os.Stderr)
-	}
-	if logLevel > ERROR {
-		InfoLogger.SetOutput(os.Stderr)
-	}
+	l.logger = log.New(logFile, "", log.Ldate|log.Ltime|log.Lshortfile)
 
 	return nil
 }
 
-func SetupLogger() {
-	logDir := filepath.Join("logs")
-	if err := Init(INFO, logDir); err != nil {
-		fmt.Printf("Failed to initialize logger: %v\n", err)
-		os.Exit(1)
+func setupLogger(LogLevel LogLevel, logDir string) *Logger {
+	logger := &Logger{
+		logLevel: LogLevel,
+		logDir:   logDir,
+		logger:   nil,
+	}
+
+	if err := logger.init(); err != nil {
+		panic(err)
+	}
+
+	return logger
+}
+
+func (l *Logger) Info(format string, v ...any) {
+	if l.logLevel >= INFO {
+		l.logger.Printf("INFO: "+format, v...)
 	}
 }
 
-func Info(format string, v ...any) {
-	InfoLogger.Printf(format, v...)
+func (l *Logger) Debug(format string, v ...any) {
+	if l.logLevel >= DEBUG {
+		l.logger.Printf("DEBUG: "+format, v...)
+	}
 }
 
-func Error(format string, v ...any) {
-	ErrorLogger.Printf(format, v...)
+func (l *Logger) Error(format string, v ...any) {
+	if l.logLevel >= ERROR {
+		l.logger.Printf("ERROR: "+format, v...)
+	}
 }
 
-func Debug(format string, v ...any) {
-	DebugLogger.Printf(format, v...)
+func ResetRegistry() {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+
+	registry = map[string]*Logger{}
 }

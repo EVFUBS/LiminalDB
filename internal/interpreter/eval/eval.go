@@ -2,28 +2,34 @@ package eval
 
 import (
 	"LiminalDb/internal/database/operations"
-	l "LiminalDb/internal/interpreter/lexer"
+	"LiminalDb/internal/database/transaction"
 	p "LiminalDb/internal/interpreter/parser"
-	"LiminalDb/internal/logger"
+	log "LiminalDb/internal/logger"
 	"fmt"
 )
 
+var logger *log.Logger
+
 type Evaluator struct {
-	parser     *p.Parser
-	operations *operations.OperationsImpl
+	parser             *p.Parser
+	operations         *operations.OperationsImpl
+	TransactionManager *transaction.TransactionManager
 }
 
 func NewEvaluator(parser *p.Parser) *Evaluator {
+	logger = log.Get("interpreter")
+
 	return &Evaluator{
-		parser:     parser,
-		operations: operations.NewOperationsImpl(),
+		parser:             parser,
+		operations:         operations.NewOperationsImpl(),
+		TransactionManager: transaction.NewTransactionManager(),
 	}
 }
 
 func (e *Evaluator) Execute(query string) (any, error) {
 	logger.Debug("Executing query: %s", query)
 
-	e.parser.Lexer = l.NewLexer(query)
+	e.parser.Lexer.SetInput(query)
 	e.parser.NextToken()
 	e.parser.NextToken()
 

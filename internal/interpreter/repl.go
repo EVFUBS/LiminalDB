@@ -2,12 +2,13 @@ package interpreter
 
 import (
 	"LiminalDb/internal/database"
-	"LiminalDb/internal/interpreter/eval"
-	"LiminalDb/internal/interpreter/lexer"
-	"LiminalDb/internal/interpreter/parser"
-	"LiminalDb/internal/logger"
+	l "LiminalDb/internal/logger"
 	"bufio"
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strings"
 )
@@ -66,6 +67,7 @@ func writeDataRow(sb *strings.Builder, row []any, colWidths []int) {
 }
 
 func Repl() {
+	logger := l.Get("repl")
 	logger.Info("Starting REPL session")
 	fmt.Println("Welcome to LiminalDB")
 	fmt.Println("Enter SQL commands, or type 'exit' to quit")
@@ -92,7 +94,7 @@ func Repl() {
 
 		logger.Debug("Processing command: %s", input)
 
-		result, err := Execute(input)
+		out, err := execRemote(input)
 		if err != nil {
 			logger.Error("Command execution failed: %v", err)
 			fmt.Printf("Error: %v\n", err)
@@ -100,8 +102,7 @@ func Repl() {
 		}
 
 		logger.Debug("Command executed successfully")
-		formattedResult := formatResult(result)
-		fmt.Println(formattedResult)
+		fmt.Println(out)
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -112,14 +113,40 @@ func Repl() {
 	logger.Info("REPL session ended")
 }
 
-func Execute(sql string) (any, error) {
-	lexer := lexer.NewLexer(sql)
-	parser := parser.NewParser(lexer)
-	evaluator := eval.NewEvaluator(parser)
-	return evaluator.Execute(sql)
+type execReq struct {
+	SQL string `json:"sql"`
 }
 
-func formatResult(result any) string {
+type execResp struct {
+	Success bool   `json:"success"`
+	Result  string `json:"result"`
+}
+
+func execRemote(sql string) (string, error) {
+	payload := execReq{SQL: sql}
+	buf := new(bytes.Buffer)
+	enc := json.NewEncoder(buf)
+	if err := enc.Encode(&payload); err != nil {
+		return "", err
+	}
+	resp, err := http.Post("http://localhost:8080/exec", "application/json", buf)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("server error: %s", strings.TrimSpace(string(b)))
+	}
+	var r execResp
+	dec := json.NewDecoder(resp.Body)
+	if err := dec.Decode(&r); err != nil {
+		return "", err
+	}
+	return r.Result, nil
+}
+
+func FormatResult(result any) string {
 	switch v := result.(type) {
 	case *database.Table:
 		return formatTableResult(v)
@@ -127,6 +154,13 @@ func formatResult(result any) string {
 		return formatTableMetadata(v)
 	case *database.QueryResult:
 		return formatQueryResult(v)
+	case []any:
+		var sb strings.Builder
+		for _, item := range v {
+			sb.WriteString(FormatResult(item))
+			sb.WriteString("\n")
+		}
+		return sb.String()
 	case string:
 		return v
 	default:

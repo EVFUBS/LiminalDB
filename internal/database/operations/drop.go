@@ -2,7 +2,6 @@ package operations
 
 import (
 	"LiminalDb/internal/database/serializer"
-	"LiminalDb/internal/logger"
 	"fmt"
 	"os"
 )

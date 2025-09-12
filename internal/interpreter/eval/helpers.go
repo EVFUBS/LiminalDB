@@ -3,6 +3,8 @@ package eval
 import (
 	"LiminalDb/internal/ast"
 	"LiminalDb/internal/common"
+	"LiminalDb/internal/database"
+	"LiminalDb/internal/database/operations"
 	"fmt"
 )
 
@@ -57,4 +59,82 @@ func buildUpdateData(values []ast.Expression) (map[string]any, error) {
 	}
 
 	return data, nil
+}
+
+func buildOperationFromStatement(stmt ast.Statement) operations.Operation {
+	switch s := stmt.(type) {
+	case *ast.SelectStatement:
+		return operations.Operation{
+			TableName: s.TableName,
+			Fields:    s.Fields,
+			Where:     s.Where,
+		}
+	case *ast.InsertStatement:
+		var insertData [][]any
+		for _, valueList := range s.ValueLists {
+			row := make([]any, len(valueList))
+			for i, expr := range valueList {
+				row[i] = expr.GetValue()
+			}
+			insertData = append(insertData, row)
+		}
+		return operations.Operation{
+			TableName: s.TableName,
+			Fields:    s.Columns,
+			Data:      operations.Data{Insert: insertData},
+		}
+	case *ast.UpdateStatement:
+		data, _ := buildUpdateData(s.Values)
+		return operations.Operation{
+			TableName: s.TableName,
+			Data:      operations.Data{Update: data},
+			Where:     s.Where,
+		}
+	case *ast.DeleteStatement:
+		return operations.Operation{
+			TableName: s.TableName,
+			Where:     s.Where,
+		}
+	case *ast.CreateTableStatement:
+		return operations.Operation{
+			Metadata: database.TableMetadata{
+				Name:        s.TableName,
+				Columns:     s.Columns,
+				ForeignKeys: s.ForeignKeys,
+			},
+		}
+	case *ast.DropTableStatement:
+		return operations.Operation{
+			TableName: s.TableName,
+		}
+	case *ast.CreateIndexStatement:
+		return operations.Operation{
+			TableName:   s.TableName,
+			IndexName:   s.IndexName,
+			ColumnNames: s.Columns,
+			IsUnique:    s.IsUnique,
+		}
+	case *ast.DropIndexStatement:
+		return operations.Operation{
+			TableName: s.TableName,
+			IndexName: s.IndexName,
+		}
+	case *ast.ShowIndexesStatement:
+		return operations.Operation{
+			TableName: s.TableName,
+		}
+	case *ast.AlterTableStatement:
+		op := operations.Operation{
+			TableName: s.TableName,
+		}
+		if s.DropConstraint {
+			op.ConstraintName = s.ConstraintName
+		}
+		if s.AddColumn {
+			op.Columns = s.Columns
+		}
+		return op
+	default:
+		return operations.Operation{}
+	}
 }

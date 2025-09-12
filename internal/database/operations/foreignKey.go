@@ -2,7 +2,6 @@ package operations
 
 import (
 	"LiminalDb/internal/database"
-	"LiminalDb/internal/logger"
 	"fmt"
 )
 

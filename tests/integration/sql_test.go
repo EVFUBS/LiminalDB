@@ -3,7 +3,7 @@ package integration
 import (
 	"LiminalDb/internal/database"
 	"LiminalDb/internal/interpreter"
-	"LiminalDb/internal/logger"
+	l "LiminalDb/internal/logger"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,7 +13,7 @@ import (
 )
 
 func execute(sql string) (any, error) {
-	logger.SetupLogger()
+	setupLogging()
 	return interpreter.Execute(sql)
 }
 
@@ -671,6 +671,13 @@ func TestTimestamp(t *testing.T) {
 	}
 
 	assertSelectResult(t, result, expected, "Timestamp Result")
+}
+
+func setupLogging() {
+	logDir := filepath.Join("logs")
+	l.New("repl", logDir, l.ERROR)
+	l.New("interpreter", logDir, l.ERROR)
+	l.New("sql", logDir, l.ERROR)
 }
 
 func assertSelectResult(t *testing.T, actualResult any, expected *database.QueryResult, queryName string) {

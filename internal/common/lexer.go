@@ -69,6 +69,9 @@ const (
 	ALTER     = "ALTER"
 	AS        = "AS"
 	BEGIN     = "BEGIN"
+	TRAN      = "TRAN"
+	COMMIT    = "COMMIT"
+	ROLLBACK  = "ROLLBACK"
 	END       = "END"
 	EXEC      = "EXEC"
 

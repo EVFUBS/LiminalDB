@@ -4,7 +4,10 @@ import (
 	"LiminalDb/internal/ast"
 	"LiminalDb/internal/database"
 	"LiminalDb/internal/database/serializer"
+	l "LiminalDb/internal/logger"
 )
+
+var logger *l.Logger
 
 type Filter func([]any, []database.Column) (bool, error)
 
@@ -56,6 +59,8 @@ type OperationsImpl struct {
 }
 
 func NewOperationsImpl() *OperationsImpl {
+	logger = l.Get("sql")
+
 	return &OperationsImpl{
 		Serializer: *serializer.NewBinarySerializer(),
 	}

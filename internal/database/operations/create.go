@@ -3,7 +3,6 @@ package operations
 import (
 	"LiminalDb/internal/database"
 	"LiminalDb/internal/database/indexing"
-	"LiminalDb/internal/logger"
 	"os"
 )
 

@@ -4,8 +4,7 @@ import (
 	"LiminalDb/internal/ast"
 	"LiminalDb/internal/database"
 	ops "LiminalDb/internal/database/operations"
-	l "LiminalDb/internal/interpreter/lexer"
-	"LiminalDb/internal/logger"
+	"LiminalDb/internal/database/transaction"
 	"LiminalDb/internal/storedproc"
 	"fmt"
 	"strings"
@@ -43,6 +42,8 @@ func (e *Evaluator) executeStatement(stmt ast.Statement) (any, error) {
 		return e.executeShowIndexes(stmt)
 	case *ast.AlterTableStatement:
 		return e.executeAlterTable(stmt)
+	case *ast.TransactionStatement:
+		return e.executeTransaction(stmt)
 	default:
 		logger.Error("Unsupported statement type: %T", stmt)
 		return nil, fmt.Errorf("unsupported statement type")
@@ -224,7 +225,7 @@ func (e *Evaluator) executeStoredProcedure(stmt *ast.ExecStatement) (any, error)
 			continue
 		}
 
-		e.parser.Lexer = l.NewLexer(statement)
+		e.parser.Lexer.SetInput(statement)
 		e.parser.NextToken()
 		e.parser.NextToken()
 
@@ -349,4 +350,38 @@ func (e *Evaluator) executeAlterTable(stmt *ast.AlterTableStatement) (any, error
 	}
 
 	return nil, nil
+}
+
+func (e *Evaluator) executeTransaction(stmt *ast.TransactionStatement) (any, error) {
+	tx := e.TransactionManager.Begin()
+
+	for _, s := range stmt.Statements {
+		var change transaction.Change
+		if _, ok := s.(*ast.BeginStatement); ok {
+			continue
+		}
+
+		if _, ok := s.(*ast.CommitStatement); ok {
+			change = transaction.Change{Commit: true}
+		}
+
+		if _, ok := s.(*ast.RollbackStatement); ok {
+			change = transaction.Change{Rollback: true}
+		}
+
+		if !change.Commit && !change.Rollback {
+			op := buildOperationFromStatement(s)
+			change = transaction.Change{Operation: op, Statement: s}
+		}
+
+		e.TransactionManager.AddChange(tx, change)
+	}
+
+	results, err := e.TransactionManager.Execute(tx, e.executeStatement)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return results, nil
 }

@@ -13,10 +13,17 @@ type Lexer struct {
 	ch           byte
 }
 
-func NewLexer(input string) *Lexer {
-	l := &Lexer{input: input}
-	l.readChar()
+func NewLexer() *Lexer {
+	l := &Lexer{}
 	return l
+}
+
+func (l *Lexer) SetInput(input string) {
+	l.input = input
+	l.position = 0
+	l.readPosition = 0
+	l.ch = 0
+	l.readChar()
 }
 
 func (l *Lexer) readChar() {
@@ -206,6 +213,9 @@ var keywords = map[string]TokenType{
 	"column":     COLUMN,
 	"default":    DEFAULT,
 	"add":        ADD,
+	"tran":       TRAN,
+	"commit":     COMMIT,
+	"rollback":   ROLLBACK,
 }
 
 func LookupIdent(ident string) TokenType {
