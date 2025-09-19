@@ -13,8 +13,14 @@ type Lexer struct {
 	ch           byte
 }
 
-func NewLexer() *Lexer {
-	l := &Lexer{}
+func NewLexer(input string) *Lexer {
+	l := &Lexer{
+		input:        input,
+		position:     0,
+		readPosition: 0,
+		ch:           0,
+	}
+	l.readChar()
 	return l
 }
 
@@ -236,7 +242,9 @@ func (l *Lexer) readString() string {
 	}
 
 	value := l.input[position:l.position]
-	l.readChar()
+	if l.ch == '\'' {
+		l.readChar()
+	}
 
 	return value
 }

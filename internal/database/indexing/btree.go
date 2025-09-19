@@ -139,6 +139,9 @@ func (t *BTree) splitChild(parent *BTreeNode, childIndex int) {
 	newChild := &BTreeNode{IsLeaf: child.IsLeaf}
 
 	midIndex := t.Degree - 1
+	midKey := child.Keys[midIndex]
+	midValue := child.Values[midIndex]
+
 	newChild.Keys = append(newChild.Keys, child.Keys[midIndex+1:]...)
 	newChild.Values = append(newChild.Values, child.Values[midIndex+1:]...)
 
@@ -158,8 +161,8 @@ func (t *BTree) splitChild(parent *BTreeNode, childIndex int) {
 	copy(parent.Values[childIndex+1:], parent.Values[childIndex:])
 	copy(parent.Children[childIndex+2:], parent.Children[childIndex+1:])
 
-	parent.Keys[childIndex] = child.Keys[midIndex]
-	parent.Values[childIndex] = child.Values[midIndex]
+	parent.Keys[childIndex] = midKey
+	parent.Values[childIndex] = midValue
 	parent.Children[childIndex+1] = newChild
 }
 

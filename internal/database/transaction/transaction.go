@@ -74,7 +74,6 @@ func (tm *TransactionManager) Begin() *Transaction {
 
 func (tm *TransactionManager) AddChange(tx *Transaction, change Change) error {
 	tm.mu.Lock()
-	// append change and update active transactions under lock to avoid concurrent map writes
 	tx.Changes = append(tx.Changes, change)
 	tm.ActiveTransactions[tx.ID] = tx
 	// TODO: Need a big figure out what needs to lock when certain stuff is done this is far to basic
@@ -94,46 +93,42 @@ func (tm *TransactionManager) AddChange(tx *Transaction, change Change) error {
 
 func (tm *TransactionManager) Execute(tx *Transaction, execFunc func(ast.Statement) (any, error)) ([]any, error) {
 	if tx.Status != Active {
-		return nil, fmt.Errorf("commited transaction is not active, transaction: %s", tx.ID)
+		return nil, fmt.Errorf("committed transaction is not active, transaction: %s", tx.ID)
 	}
 
 	for _, lock := range tx.Locks {
 		tm.LockManager.requestLock(lock.ResourceID, lock, time.Now().Unix())
 	}
 
+	// TODO: This is very basic, need to implement wait timeouts and deadlock detection
+	for _, lock := range tx.Locks {
+		for {
+			hasLock := tm.LockManager.checkLock(lock.ResourceID, lock)
+			if hasLock {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
 	var results []any
 	var rollback bool
 	var commit bool
 	for _, change := range tx.Changes {
-
 		if change.Rollback {
 			rollback = true
 			break
 		}
-
 		if change.Commit {
 			commit = true
 			break
 		}
-
-		for {
-			hasLock := tm.LockManager.checkLock(change.Operation.TableName, tx.Locks[change.Operation.TableName])
-			if hasLock {
-				break
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-
 		changeResult, err := execFunc(change.Statement)
 		if err != nil {
 			return nil, err
 		}
 		results = append(results, changeResult)
-
-		tm.LockManager.releaseLock(change.Operation.TableName, tx.Locks[change.Operation.TableName])
 	}
-
-	tm.releaseLocksForTransaction(tx)
 
 	if rollback || !commit {
 		tm.Rollback(tx)
@@ -150,7 +145,7 @@ func (tm *TransactionManager) Execute(tx *Transaction, execFunc func(ast.Stateme
 
 // Commit - deletes the transaction from the active transactions map
 func (tm *TransactionManager) Commit(tx *Transaction) error {
-	// TODO: don't think we should delete this maybe
+	tm.releaseLocksForTransaction(tx)
 	tm.mu.Lock()
 	delete(tm.ActiveTransactions, tx.ID)
 	tm.mu.Unlock()

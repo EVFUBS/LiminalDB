@@ -14,6 +14,13 @@ func (p *Parser) NextToken() {
 	p.peekToken = p.Lexer.NextToken()
 }
 
+func (p *Parser) Reset(input string) {
+	p.errors = []string{}
+	p.Lexer.SetInput(input)
+	p.curToken = p.Lexer.NextToken()
+	p.peekToken = p.Lexer.NextToken()
+}
+
 func (p *Parser) parseProcedureBody() (string, bool, error) {
 	if !p.expectPeek(AS) {
 		return "", false, fmt.Errorf("expected as, got %s", p.curToken.Literal)

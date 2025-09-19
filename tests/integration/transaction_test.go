@@ -5,6 +5,7 @@ import (
 	"LiminalDb/internal/server"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -113,29 +114,6 @@ func TestTransactionRollback(t *testing.T) {
 	}
 }
 
-// execRemoteCount runs a SELECT COUNT(*) query and returns the parsed count.
-func execRemoteCount(sql string) (int, error) {
-	out, err := execRemote(sql)
-	if err != nil {
-		return 0, err
-	}
-	return extractRowCount(out)
-}
-
-// extractRowCount finds "N row(s) in set" in the result and returns N.
-func extractRowCount(out string) (int, error) {
-	re := regexp.MustCompile(`(?m)(\d+)\s+row\(s\)\s+in\s+set`)
-	m := re.FindStringSubmatch(out)
-	if len(m) < 2 {
-		return 0, &httpError{msg: "failed to parse row count from output: " + out}
-	}
-	n, err := strconv.Atoi(m[1])
-	if err != nil {
-		return 0, err
-	}
-	return n, nil
-}
-
 func TestConcurrentInsertsSameTable(t *testing.T) {
 	cleanupDBDir()
 	// create table
@@ -155,9 +133,7 @@ func TestConcurrentInsertsSameTable(t *testing.T) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			sql := strings.Join([]string{
-				"INSERT INTO concurrent_inserts (id, name) VALUES (" + strconv.Itoa(id) + ", 'User" + strconv.Itoa(id) + "')",
-			}, "\n")
+			sql := "INSERT INTO concurrent_inserts (id, name) VALUES (" + strconv.Itoa(id) + ", 'User" + strconv.Itoa(id) + "')"
 			_, e := execRemote(sql)
 			if e != nil {
 				errCh <- e
@@ -177,10 +153,7 @@ func TestConcurrentInsertsSameTable(t *testing.T) {
 		successCount++
 	}
 
-	// ensure server didn't crash for any writer errors but allow some to fail if primary key collisions occur
 	if len(errCh) > 0 {
-		// collect a few error messages for debugging but don't fail the test solely for errors;
-		// we will assert that final row count equals number of successes.
 		errSamples := []string{}
 		for e := range errCh {
 			errSamples = append(errSamples, e.Error())
@@ -191,13 +164,18 @@ func TestConcurrentInsertsSameTable(t *testing.T) {
 		t.Logf("writers returned %d errors (sample): %v", len(errSamples), errSamples)
 	}
 
-	// verify final count matches successCount
-	count, err := execRemoteCount("SELECT COUNT(*) FROM concurrent_inserts")
+	result, err := execRemote("SELECT * FROM concurrent_inserts")
 	if err != nil {
 		t.Fatalf("failed to select count after concurrent inserts: %v", err)
 	}
-	if count != successCount {
-		t.Fatalf("expected %d rows after concurrent inserts, got %d", successCount, count)
+
+	resultCount, err := extractCount(result)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+
+	if resultCount != 50 {
+		t.Fatalf("expected 50 successful inserts, got %d", resultCount)
 	}
 }
 
@@ -241,7 +219,7 @@ func TestConcurrentReadersDuringWrites(t *testing.T) {
 			defer wg.Done()
 			// poll a few times while writers are running
 			for j := 0; j < 20; j++ {
-				_, e := execRemote("SELECT COUNT(*) FROM cr_table")
+				_, e := execRemote("SELECT * FROM cr_table")
 				if e != nil {
 					readerErrors <- e
 					return
@@ -261,6 +239,17 @@ func TestConcurrentReadersDuringWrites(t *testing.T) {
 		successCount++
 	}
 
+	if len(writerErrors) > 0 {
+		errSamples := []string{}
+		for e := range writerErrors {
+			errSamples = append(errSamples, e.Error())
+			if len(errSamples) >= 5 {
+				break
+			}
+		}
+		t.Fatalf("writers returned errors (sample): %v", errSamples)
+	}
+
 	if len(readerErrors) > 0 {
 		errSamples := []string{}
 		for e := range readerErrors {
@@ -273,11 +262,91 @@ func TestConcurrentReadersDuringWrites(t *testing.T) {
 	}
 
 	// final verification
-	count, err := execRemoteCount("SELECT COUNT(*) FROM cr_table")
+	result, err := execRemote("SELECT * FROM cr_table")
 	if err != nil {
 		t.Fatalf("failed to select count after concurrent readers/writers: %v", err)
 	}
-	if count != successCount {
-		t.Fatalf("expected %d rows after concurrent readers/writers, got %d", successCount, count)
+
+	resultCount, err := extractCount(result)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+
+	if resultCount != writers {
+		t.Fatalf("expected %d successful inserts, got %d", writers, resultCount)
+	}
+}
+
+func extractCount(result string) (int, error) {
+	re := regexp.MustCompile(`\d+`)
+	matches := re.FindAllString(result, -1)
+	if len(matches) == 0 {
+		return 0, fmt.Errorf("failed to extract count from result: %s", result)
+	}
+	last := matches[len(matches)-1]
+	count, err := strconv.Atoi(last)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse count %q from result: %w", last, err)
+	}
+	return count, nil
+}
+
+func TestTransactionMixedOperations(t *testing.T) {
+	cleanupDBDir()
+
+	// Mixed-operations transaction (commit)
+	sql := strings.Join([]string{
+		"BEGIN TRAN",
+		"CREATE TABLE mix (id int primary key, name string(50), cnt int)",
+		"INSERT INTO mix (id, name, cnt) VALUES (1, 'Alice', 10)",
+		"INSERT INTO mix (id, name, cnt) VALUES (2, 'Bob', 20)",
+		"UPDATE mix SET cnt = cnt + 5 WHERE id = 1",
+		"DELETE FROM mix WHERE id = 2",
+		"ALTER TABLE mix ADD COLUMN extra string(10) NULL",
+		"COMMIT",
+	}, "\n")
+	if _, err := execRemote(sql); err != nil {
+		t.Fatalf("failed to execute mixed transaction: %v", err)
+	}
+
+	out, err := execRemote("SELECT id, name, cnt, extra FROM mix WHERE id = 1")
+	if err != nil {
+		t.Fatalf("failed to select from committed table: %v", err)
+	}
+
+	if !strings.Contains(out, "Alice") {
+		t.Fatalf("expected name Alice in result, got: %s", out)
+	}
+	if !strings.Contains(out, "15") {
+		t.Fatalf("expected updated cnt 15 in result, got: %s", out)
+	}
+	// ensure exactly one row returned
+	cnt, err := extractCount(out)
+	if err != nil {
+		t.Fatalf("failed to extract count from select result: %v", err)
+	}
+	if cnt != 1 {
+		t.Fatalf("expected 1 row for id=1, got %d (result: %s)", cnt, out)
+	}
+
+	// ensure table file exists on disk
+	path := filepath.Join("./db/tables", "mix.bin")
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("expected table file to exist after commit: %v", statErr)
+	}
+
+	// Rollback scenario: create a table and insert, then rollback; table should not exist
+	sqlRB := strings.Join([]string{
+		"BEGIN TRAN",
+		"CREATE TABLE mix_rb (id int primary key, val int)",
+		"INSERT INTO mix_rb (id, val) VALUES (1, 100)",
+		"ROLLBACK",
+	}, "\n")
+	if _, err := execRemote(sqlRB); err != nil {
+		t.Fatalf("failed to execute rollback transaction: %v", err)
+	}
+	// selecting from rolled-back table should produce an error
+	if _, selErr := execRemote("SELECT 1 FROM mix_rb"); selErr == nil {
+		t.Fatalf("expected selecting from rolled-back table to return an error")
 	}
 }
