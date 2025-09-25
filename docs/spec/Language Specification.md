@@ -78,9 +78,65 @@ CREATE TABLE users (
 )
 ```
 
+### Foreign Keys
+
+Foreign keys establish relationships between tables by referencing the primary key of another table. This ensures referential integrity in the database.
+
+```sql
+CREATE TABLE table_name (
+    column1 data_type [constraints],
+    column2 data_type,
+    FOREIGN KEY (column2) REFERENCES referenced_table(referenced_column)
+)
+```
+
+Example:
+```sql
+CREATE TABLE customers (
+    cid int primary key,
+    name string(100)
+)
+
+CREATE TABLE orders (
+    oid int primary key,
+    customer_id int,
+    FOREIGN KEY (customer_id) REFERENCES customers(cid)
+)
+```
+
+When using foreign keys:
+- The referenced column must be a primary key in the referenced table
+- Inserting a value in the foreign key column that doesn't exist in the referenced table will fail
+- The data types of the foreign key and referenced column must match
+
+Example usage:
+```sql
+-- This will succeed because customer with cid=1 exists
+INSERT INTO customers (cid, name) VALUES (1, 'John Doe')
+INSERT INTO orders (oid, customer_id) VALUES (1, 1)
+
+-- This will fail because customer with cid=999 doesn't exist
+INSERT INTO orders (oid, customer_id) VALUES (2, 999)
+```
+
+### Dropping Foreign Keys
+
+To remove a foreign key constraint from a table, use the `DROP FOREIGN KEY` statement:
+
+```sql
+ALTER TABLE table_name DROP FOREIGN KEY constraint_name
+```
+
+Example:
+```sql
+-- Remove the foreign key constraint from the orders table
+ALTER TABLE orders DROP FOREIGN KEY fk_customer_id
+```
+
+Note: When dropping a table that has foreign key constraints referencing it, you must first drop the foreign key constraints or drop the referencing tables.
+
 Constraints:
 - `primary key`: Designates a column as the primary key
-- `not null`: Specifies that a column cannot contain NULL values
 
 #### DROP TABLE
 

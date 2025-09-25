@@ -1,7 +1,8 @@
-package tests
+package integration
 
 import (
 	"LiminalDb/internal/database"
+	"LiminalDb/internal/database/serializer"
 	"bytes"
 	"testing"
 	"time"
@@ -13,7 +14,7 @@ func TestSerializeHeader(t *testing.T) {
 		Version: database.CurrentVersion,
 	}
 
-	serializer := database.BinarySerializer{}
+	serializer := serializer.BinarySerializer{}
 	data, err := serializer.SerializeHeader(header)
 	if err != nil {
 		t.Fatalf("Failed to serialize header: %v", err)
@@ -78,7 +79,7 @@ func TestSerializeMetadata(t *testing.T) {
 		},
 	}
 
-	serializer := database.BinarySerializer{}
+	serializer := serializer.BinarySerializer{}
 	data, _, err := serializer.SerializeMetadata(metadata)
 	if err != nil {
 		t.Fatalf("Failed to serialize metadata: %v", err)
@@ -152,11 +153,11 @@ func TestSerializeRow(t *testing.T) {
 		{Name: "name", DataType: database.TypeString, Length: 100},
 		{Name: "age", DataType: database.TypeInteger64},
 		{Name: "active", DataType: database.TypeBoolean},
-		{Name: "created_at", DataType: database.TypeTimestamp},
+		{Name: "created_at", DataType: database.TypeDatetime},
 	}
 
 	now := time.Now()
-	row := []interface{}{
+	row := []any{
 		int64(1),
 		"John Doe",
 		int64(30),
@@ -164,7 +165,7 @@ func TestSerializeRow(t *testing.T) {
 		now,
 	}
 
-	serializer := database.BinarySerializer{}
+	serializer := serializer.BinarySerializer{}
 	data, err := serializer.SerializeRow(row, columns)
 	if err != nil {
 		t.Fatalf("Failed to serialize row: %v", err)
@@ -230,13 +231,13 @@ func TestSerializeTable(t *testing.T) {
 				},
 			},
 		},
-		Data: [][]interface{}{
+		Data: [][]any{
 			{int64(1), "John Doe", int64(30)},
 			{int64(2), "Jane Smith", int64(25)},
 		},
 	}
 
-	serializer := database.BinarySerializer{}
+	serializer := serializer.BinarySerializer{}
 	data, err := serializer.SerializeTable(table)
 	if err != nil {
 		t.Fatalf("Failed to serialize table: %v", err)
@@ -296,8 +297,8 @@ func TestInvalidDataTypes(t *testing.T) {
 	}
 
 	// Test invalid data type
-	row := []interface{}{"not an integer"}
-	serializer := database.BinarySerializer{}
+	row := []any{"not an integer"}
+	serializer := serializer.BinarySerializer{}
 	_, err := serializer.SerializeRow(row, columns)
 	if err == nil {
 		t.Error("Expected error for invalid data type, got nil")
@@ -310,8 +311,8 @@ func TestStringLengthExceeded(t *testing.T) {
 	}
 
 	// Test string exceeding length
-	row := []interface{}{"too long string"}
-	serializer := database.BinarySerializer{}
+	row := []any{"too long string"}
+	serializer := serializer.BinarySerializer{}
 	_, err := serializer.SerializeRow(row, columns)
 	if err == nil {
 		t.Error("Expected error for string exceeding length, got nil")

@@ -2,99 +2,47 @@ package operations
 
 import (
 	"LiminalDb/internal/ast"
+	"LiminalDb/internal/common"
 	"LiminalDb/internal/database"
 	"LiminalDb/internal/database/indexing"
-	"LiminalDb/internal/logger"
 	"fmt"
 	"os"
 )
 
-func (o *OperationsImpl) findBestIndex(table *database.Table, _ func([]interface{}, []database.Column) (bool, error), where ast.Expression) (*database.IndexMetadata, interface{}) {
+type candidateIndex struct {
+	index *database.IndexMetadata
+	key   any
+}
+
+func (o *OperationsImpl) findBestIndexColumn(table *database.Table, where ast.Expression) (*database.IndexMetadata, any) {
 	if where == nil {
 		return nil, nil
 	}
 
-	type candidateIndex struct {
-		index *database.IndexMetadata
-		key   interface{}
+	colNameFromFilter, valFromFilter, foundEquality := extractAssignment(where)
+	if !foundEquality {
+		return nil, nil
 	}
+
 	var candidates []candidateIndex
+	for i := range table.Metadata.Indexes {
+		idx := &table.Metadata.Indexes[i]
 
-	var extractEqualityParts func(expr ast.Expression) (colName string, val interface{}, found bool)
-	extractEqualityParts = func(expr ast.Expression) (string, interface{}, bool) {
-
-		binExpr, ok := expr.(*ast.WhereExpression)
-		if !ok {
-			return "", nil, false
-		}
-
-		if binExpr.Op != "=" { // <-- ### ADAPT THIS CONDITION ###
-			return "", nil, false
-		}
-
-		var columnName string
-		var value interface{}
-		foundColumnValue := false
-
-		if leftIdent, okL := binExpr.Left.(*ast.Identifier); okL {
-			if rightLit, okR := binExpr.Right.(*ast.Literal); okR {
-				columnName = leftIdent.Value
-				value = rightLit.Value
-				foundColumnValue = true
-			}
-		}
-
-		if !foundColumnValue {
-			if rightIdent, okR := binExpr.Right.(*ast.Identifier); okR {
-				if leftLit, okL := binExpr.Left.(*ast.Literal); okL {
-					columnName = rightIdent.Value
-					value = leftLit.Value
-					foundColumnValue = true
-				}
-			}
-		}
-
-		if foundColumnValue {
-			return columnName, value, true
-		}
-
-		return "", nil, false
-	}
-
-	colNameFromFilter, valFromFilter, foundEquality := extractEqualityParts(where)
-
-	if foundEquality {
-		for i := range table.Metadata.Indexes {
-			idx := &table.Metadata.Indexes[i]
-
-			if len(idx.Columns) == 1 && idx.Columns[0] == colNameFromFilter {
-				candidates = append(candidates, candidateIndex{index: idx, key: valFromFilter})
-			}
-			// TODO: Extend to support composite indexes. This would involve checking if the 'where'
-			// clause provides values for the leading columns of a composite index.
+		// Only consider single-column indexes that match the equality condition.
+		// TODO: Extend to support composite indexes. This would involve checking if the 'where'
+		// clause provides values for the leading columns of a composite index.
+		if len(idx.Columns) == 1 && idx.Columns[0] == colNameFromFilter {
+			candidates = append(candidates, candidateIndex{index: idx, key: valFromFilter})
 		}
 	}
 
 	if len(candidates) == 0 {
-		return nil, nil // No suitable index found that matches the 'where' clause structure
+		return nil, nil
 	}
 
-	var bestCandidate *candidateIndex
-
-	for i := range candidates {
-		if candidates[i].index.IsPrimary {
-			bestCandidate = &candidates[i]
-			break
-		}
-	}
-
+	bestCandidate := findPrimaryIndex(candidates)
 	if bestCandidate == nil {
-		for i := range candidates {
-			if candidates[i].index.IsUnique {
-				bestCandidate = &candidates[i]
-				break
-			}
-		}
+		bestCandidate = findUniqueIndex(candidates)
 	}
 
 	if bestCandidate == nil && len(candidates) > 0 {
@@ -108,22 +56,90 @@ func (o *OperationsImpl) findBestIndex(table *database.Table, _ func([]interface
 	return nil, nil
 }
 
-func (o *OperationsImpl) CreateIndex(tableName string, indexName string, columns []string, isUnique bool) error {
-	logger.Info("Creating index %s on table %s", indexName, tableName)
+func extractAssignments(where ast.Expression) (assignments map[string]any) {
+	if where == nil {
+		return nil
+	}
 
-	table, err := o.Serializer.ReadTableFromFile(tableName)
+	assignments = make(map[string]any)
+
+	switch expr := where.(type) {
+	case *ast.AssignmentExpression:
+		if colName, val, found := extractAssignment(expr); found {
+			assignments[colName] = val
+		}
+	case *ast.BinaryExpression:
+		if common.LogicalOperators[expr.Op] {
+			leftAssignments := extractAssignments(expr.Left)
+			rightAssignments := extractAssignments(expr.Right)
+
+			for k, v := range leftAssignments {
+				assignments[k] = v
+			}
+			for k, v := range rightAssignments {
+				assignments[k] = v
+			}
+		}
+	}
+
+	return assignments
+}
+
+func extractAssignment(expr ast.Expression) (colName string, val any, found bool) {
+	binExpr, ok := expr.(*ast.AssignmentExpression)
+	if !ok || binExpr.Op != "=" {
+		return "", nil, false
+	}
+
+	if leftIdent, okL := binExpr.Left.(*ast.Identifier); okL {
+		if rightLit, okR := binExpr.Right.(ast.Expression); okR {
+			return leftIdent.Value, rightLit.GetValue(), true
+		}
+	}
+
+	if rightIdent, okR := binExpr.Right.(*ast.Identifier); okR {
+		if leftLit, okL := binExpr.Left.(ast.Expression); okL {
+			return rightIdent.Value, leftLit.GetValue(), true
+		}
+	}
+
+	return "", nil, false
+}
+
+func findPrimaryIndex(candidates []candidateIndex) *candidateIndex {
+	for i := range candidates {
+		if candidates[i].index.IsPrimary {
+			return &candidates[i]
+		}
+	}
+	return nil
+}
+
+func findUniqueIndex(candidates []candidateIndex) *candidateIndex {
+	for i := range candidates {
+		if candidates[i].index.IsUnique {
+			return &candidates[i]
+		}
+	}
+	return nil
+}
+
+func (o *OperationsImpl) CreateIndex(op *Operation) error {
+	logger.Info("Creating index %s on table %s", op.IndexName, op.TableName)
+
+	table, err := o.Serializer.ReadTableFromFile(op.TableName)
 	if err != nil {
-		logger.Error("Failed to read table %s: %v", tableName, err)
+		logger.Error("Failed to read table %s: %v", op.TableName, err)
 		return err
 	}
 
 	for _, idx := range table.Metadata.Indexes {
-		if idx.Name == indexName {
-			return fmt.Errorf("index %s already exists on table %s", indexName, tableName)
+		if idx.Name == op.IndexName {
+			return fmt.Errorf("index %s already exists on table %s", op.IndexName, op.TableName)
 		}
 	}
 
-	for _, col := range columns {
+	for _, col := range op.ColumnNames {
 		found := false
 		for _, tableCol := range table.Metadata.Columns {
 			if tableCol.Name == col {
@@ -132,14 +148,14 @@ func (o *OperationsImpl) CreateIndex(tableName string, indexName string, columns
 			}
 		}
 		if !found {
-			return fmt.Errorf("column %s not found in table %s", col, tableName)
+			return fmt.Errorf("column %s not found in table %s", col, op.TableName)
 		}
 	}
 
 	isPrimary := false
-	if len(columns) == 1 {
+	if len(op.Columns) == 1 {
 		for _, col := range table.Metadata.Columns {
-			if col.Name == columns[0] && col.IsPrimaryKey {
+			if col.Name == op.ColumnNames[0] && col.IsPrimaryKey {
 				isPrimary = true
 				break
 			}
@@ -147,27 +163,27 @@ func (o *OperationsImpl) CreateIndex(tableName string, indexName string, columns
 	}
 
 	indexMetadata := database.IndexMetadata{
-		Name:      indexName,
-		Columns:   columns,
-		IsUnique:  isUnique,
+		Name:      op.IndexName,
+		Columns:   op.ColumnNames,
+		IsUnique:  op.IsUnique,
 		IsPrimary: isPrimary,
 	}
 
 	table.Metadata.Indexes = append(table.Metadata.Indexes, indexMetadata)
 
-	index := indexing.NewIndex(indexName, tableName, columns, isUnique)
+	index := indexing.NewIndex(op.IndexName, op.TableName, op.ColumnNames, op.IsUnique)
 
-	err = o.insertIndexIntoTree(table, index, columns)
+	err = o.insertIndexIntoTree(table, index, op.ColumnNames)
 	if err != nil {
 		return err
 	}
 
-	err = o.SaveIndexToFile(index, tableName, indexName)
+	err = o.SaveIndexToFile(index, op.TableName, op.IndexName)
 	if err != nil {
 		return err
 	}
 
-	return o.Serializer.WriteTableToFile(table, tableName)
+	return o.Serializer.WriteTableToFile(table, op.TableName)
 }
 
 func (o *OperationsImpl) SaveIndexToFile(index *indexing.Index, tableName string, indexName string) error {
@@ -184,20 +200,20 @@ func (o *OperationsImpl) SaveIndexToFile(index *indexing.Index, tableName string
 	return nil
 }
 
-func (o *OperationsImpl) DropIndex(tableName string, indexName string) error {
-	logger.Info("Dropping index %s from table %s", indexName, tableName)
+func (o *OperationsImpl) DropIndex(op *Operation) *Result {
+	logger.Info("Dropping index %s from table %s", op.IndexName, op.TableName)
 
-	table, err := o.Serializer.ReadTableFromFile(tableName)
+	table, err := o.Serializer.ReadTableFromFile(op.TableName)
 	if err != nil {
-		logger.Error("Failed to read table %s: %v", tableName, err)
-		return err
+		logger.Error("Failed to read table %s: %v", op.TableName, err)
+		return &Result{Err: err}
 	}
 
 	indexFound := false
 	for i, idx := range table.Metadata.Indexes {
-		if idx.Name == indexName {
+		if idx.Name == op.IndexName {
 			if idx.IsPrimary {
-				return fmt.Errorf("cannot drop primary key index")
+				return &Result{Err: fmt.Errorf("cannot drop primary key index")}
 			}
 
 			table.Metadata.Indexes = append(table.Metadata.Indexes[:i], table.Metadata.Indexes[i+1:]...)
@@ -207,27 +223,32 @@ func (o *OperationsImpl) DropIndex(tableName string, indexName string) error {
 	}
 
 	if !indexFound {
-		return fmt.Errorf("index %s not found on table %s", indexName, tableName)
+		return &Result{Err: fmt.Errorf("index %s not found on table %s", op.IndexName, op.TableName)}
 	}
 
-	indexFilePath := getIndexFilePath(tableName, indexName)
+	indexFilePath := getIndexFilePath(op.TableName, op.IndexName)
 	if err := os.Remove(indexFilePath); err != nil && !os.IsNotExist(err) {
-		return err
+		return &Result{Err: err}
 	}
 
-	return o.Serializer.WriteTableToFile(table, tableName)
+	err = o.Serializer.WriteTableToFile(table, op.TableName)
+	if err != nil {
+		return &Result{Err: err}
+	}
+
+	return &Result{}
 }
 
-func (o *OperationsImpl) ListIndexes(tableName string) ([]database.IndexMetadata, error) {
-	logger.Debug("Listing indexes for table %s", tableName)
+func (o *OperationsImpl) ListIndexes(op *Operation) Result {
+	logger.Debug("Listing indexes for table %s", op.TableName)
 
-	table, err := o.Serializer.ReadTableFromFile(tableName)
+	table, err := o.Serializer.ReadTableFromFile(op.TableName)
 	if err != nil {
-		logger.Error("Failed to read table %s: %v", tableName, err)
-		return nil, err
+		logger.Error("Failed to read table %s: %v", op.TableName, err)
+		return Result{Err: err}
 	}
 
-	return table.Metadata.Indexes, nil
+	return Result{IndexMetaData: table.Metadata.Indexes}
 }
 
 func (o *OperationsImpl) loadIndex(tableName string, indexName string) (*indexing.Index, error) {

@@ -2,12 +2,10 @@ package operations
 
 import (
 	"LiminalDb/internal/database"
-	"LiminalDb/internal/logger"
 	"fmt"
 )
 
-// TODO: can already see this implementation being crap for performance so circle back to this
-func (o *OperationsImpl) writeForeignKeyCheck(table *database.Table, newRow []interface{}) error {
+func (o *OperationsImpl) writeForeignKeyCheck(table *database.Table, newRow []any) error {
 	for _, foreignKey := range table.Metadata.ForeignKeys {
 
 		refTable, err := o.Serializer.ReadTableFromFile(foreignKey.ReferencedTable)
@@ -67,7 +65,7 @@ func (o *OperationsImpl) writeForeignKeyCheck(table *database.Table, newRow []in
 	return nil
 }
 
-func (o *OperationsImpl) DeleteRowForeignKeyCheck(table *database.Table, rowsToDelete []bool) error {
+func (o *OperationsImpl) deleteRowForeignKeyCheck(table *database.Table, rowsToDelete []bool) error {
 	tables, err := o.Serializer.ListTables()
 	if err != nil {
 		return fmt.Errorf("failed to list tables for foreign key check: %w", err)

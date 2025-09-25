@@ -1,18 +1,19 @@
-package tests
+package integration
 
 import (
 	"LiminalDb/internal/database"
 	"LiminalDb/internal/interpreter"
-	"LiminalDb/internal/logger"
+	l "LiminalDb/internal/logger"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func execute(sql string) (any, error) {
-	logger.SetupLogger()
+	setupLogging()
 	return interpreter.Execute(sql)
 }
 
@@ -31,7 +32,7 @@ func TestCreateTable(t *testing.T) {
 		t.Fatalf("Failed to execute CREATE TABLE: %v", err)
 	}
 
-	tablePath := filepath.Join("./db", "users"+database.FileExtension)
+	tablePath := filepath.Join("./db/tables", "users"+database.FileExtension)
 	if _, err := os.Stat(tablePath); os.IsNotExist(err) {
 		t.Errorf("Table file was not created at %s", tablePath)
 	}
@@ -48,6 +49,55 @@ func TestInsertRow(t *testing.T) {
 	_, err = execute(insertSQL)
 	if err != nil {
 		t.Fatalf("Failed to execute INSERT: %v", err)
+	}
+}
+
+func TestUpdateRow(t *testing.T) {
+	defer cleanupDB(t)
+	_, err := execute("CREATE TABLE items (id int primary key, description string(200))")
+	if err != nil {
+		t.Fatalf("Failed to create table for update test: %v", err)
+	}
+
+	_, err = execute("INSERT INTO items (id, description) VALUES (1, 'Old Description')")
+	if err != nil {
+		t.Fatalf("Failed to insert row for update test: %v", err)
+	}
+
+	updateSQL := "UPDATE items SET description = 'Updated Description' WHERE id = 1"
+	_, err = execute(updateSQL)
+	if err != nil {
+		t.Fatalf("Failed to execute UPDATE: %v", err)
+	}
+
+	selectSQL := "SELECT description FROM items WHERE id = 1"
+	result, err := execute(selectSQL)
+	if err != nil {
+		t.Fatalf("Failed to execute SELECT after UPDATE: %v", err)
+	}
+
+	expected := &database.QueryResult{
+		Columns: []database.Column{
+			{
+				Name:         "description",
+				DataType:     database.TypeString,
+				Length:       200,
+				IsNullable:   true,
+				IsPrimaryKey: false,
+			},
+		},
+		Rows: [][]any{
+			{"Updated Description"},
+		},
+	}
+
+	resultSlice, ok := result.(*database.QueryResult)
+	if !ok {
+		t.Fatalf("SELECT result is not of expected type *database.QueryResult, got %T", result)
+	}
+
+	if !reflect.DeepEqual(resultSlice, expected) {
+		t.Errorf("SELECT result mismatch. Expected %v, got %v", expected, resultSlice)
 	}
 }
 
@@ -135,13 +185,13 @@ func TestDropRow(t *testing.T) {
 }
 
 func TestDropTable(t *testing.T) {
-	defer cleanupDB(t) // Ensure cleanup even if table creation fails for some reason
+	defer cleanupDB(t)
 	_, err := execute("CREATE TABLE temp_table (id int primary key)")
 	if err != nil {
 		t.Fatalf("Failed to create table for drop table test: %v", err)
 	}
 
-	tablePath := filepath.Join("./db", "temp_table"+database.FileExtension)
+	tablePath := filepath.Join("./db/tables", "temp_table"+database.FileExtension)
 	if _, err := os.Stat(tablePath); os.IsNotExist(err) {
 		t.Fatalf("Table file was not created at %s before drop", tablePath)
 	}
@@ -164,8 +214,6 @@ func TestSelectNonExistentTable(t *testing.T) {
 	if err == nil {
 		t.Errorf("Expected error when selecting from non-existent table, but got nil")
 	}
-	// Add more specific error checking if your interpreter returns typed errors
-	// For example: if !strings.Contains(err.Error(), "table not found") { ... }
 }
 
 func TestInsertIntoNonExistentTable(t *testing.T) {
@@ -255,7 +303,6 @@ func TestComplexQuery(t *testing.T) {
 
 	assertSelectResult(t, result1, expected1, "Query 1")
 
-	// Test 2: Select all from HR or Marketing
 	selectSQL2 := "SELECT name, department FROM employees WHERE department = 'HR' OR department = 'Marketing'"
 	result2, err2 := execute(selectSQL2)
 	if err2 != nil {
@@ -284,13 +331,11 @@ func TestComplexQuery(t *testing.T) {
 	}
 	assertSelectResult(t, result2, expected2, "Query 2")
 
-	// Test 3: Delete HR department
 	_, err = execute("DELETE FROM employees WHERE department = 'HR'")
 	if err != nil {
 		t.Fatalf("Failed to delete HR department: %v", err)
 	}
 
-	// Verify deletion
 	selectSQL3 := "SELECT name FROM employees WHERE department = 'HR'"
 	result3, err3 := execute(selectSQL3)
 	if err3 != nil {
@@ -308,7 +353,6 @@ func TestComplexQuery(t *testing.T) {
 			},
 		}, "Query 3 (Post HR Deletion)")
 	}
-
 }
 
 func TestSproc(t *testing.T) {
@@ -357,7 +401,285 @@ func TestSproc(t *testing.T) {
 	assertSelectResult(t, result, expected, "Sproc Result")
 }
 
-// assertSelectResult is a helper to reduce boilerplate in SELECT tests
+func TestForeignKey(t *testing.T) {
+	defer cleanupDB(t)
+	_, err := execute("CREATE TABLE customers (cid int primary key, name string(100))")
+	if err != nil {
+		t.Fatalf("Failed to create customers table: %v", err)
+	}
+
+	_, err = execute("CREATE TABLE orders (oid int primary key, customer_id int, FOREIGN KEY (customer_id) REFERENCES customers(cid))")
+	if err != nil {
+		t.Fatalf("Failed to create orders table with foreign key: %v", err)
+	}
+
+	_, err = execute("INSERT INTO customers (cid, name) VALUES (1, 'John Doe')")
+	if err != nil {
+		t.Fatalf("Failed to insert customer: %v", err)
+	}
+
+	_, err = execute("INSERT INTO orders (oid, customer_id) VALUES (1, 1)")
+	if err != nil {
+		t.Fatalf("Failed to insert order with valid foreign key: %v", err)
+	}
+
+	_, err = execute("INSERT INTO orders (oid, customer_id) VALUES (2, 999)")
+	if err == nil {
+		t.Errorf("Expected error when inserting order with invalid foreign key, got nil")
+	}
+}
+
+func TestDropForeignKey(t *testing.T) {
+	defer cleanupDB(t)
+	_, err := execute("CREATE TABLE customers (cid int primary key, name string(100))")
+	if err != nil {
+		t.Fatalf("Failed to create customers table: %v", err)
+	}
+
+	_, err = execute("CREATE TABLE orders (oid int primary key, customer_id int, FOREIGN KEY (customer_id) REFERENCES customers(cid))")
+	if err != nil {
+		t.Fatalf("Failed to create orders table with foreign key: %v", err)
+	}
+
+	_, err = execute("ALTER TABLE orders DROP CONSTRAINT FK_orders_customer_id")
+	if err != nil {
+		t.Fatalf("Failed to drop foreign key: %v", err)
+	}
+
+	_, err = execute("INSERT INTO orders (oid, customer_id) VALUES (3, 1)")
+	if err != nil {
+		t.Errorf("Expected success when inserting order after dropping foreign key, got error: %v", err)
+	}
+}
+
+func TestAddColumnNoData(t *testing.T) {
+	defer cleanupDB(t)
+	_, err := execute("CREATE TABLE products (pid int primary key, pname string(50))")
+	if err != nil {
+		t.Fatalf("Failed to create products table: %v", err)
+	}
+
+	// Add a new column without any data
+	alterSQL := "ALTER TABLE products ADD COLUMN price float"
+	_, err = execute(alterSQL)
+	if err != nil {
+		t.Fatalf("Failed to add column: %v", err)
+	}
+
+	selectSQL := "SELECT pid, pname, price FROM products"
+	result, err := execute(selectSQL)
+	if err != nil {
+		t.Fatalf("Failed to execute SELECT after adding column: %v", err)
+	}
+
+	expected := &database.QueryResult{
+		Columns: []database.Column{
+			{
+				Name:         "pid",
+				DataType:     database.TypeInteger64,
+				Length:       0,
+				IsNullable:   false,
+				IsPrimaryKey: true,
+			},
+			{
+				Name:         "pname",
+				DataType:     database.TypeString,
+				Length:       50,
+				IsNullable:   true,
+				IsPrimaryKey: false,
+			},
+			{
+				Name:       "price",
+				DataType:   database.TypeFloat64,
+				Length:     0,
+				IsNullable: true,
+			},
+		},
+		Rows: [][]any{},
+	}
+
+	assertSelectResult(t, result, expected, "Add Column No Data Result")
+}
+
+func TestAddColumnWithData(t *testing.T) {
+	defer cleanupDB(t)
+	_, err := execute("CREATE TABLE products (pid int primary key, pname string(50))")
+	if err != nil {
+		t.Fatalf("Failed to create products table: %v", err)
+	}
+
+	_, err = execute("INSERT INTO products (pid, pname) VALUES (1, 'Product A')")
+	if err != nil {
+		t.Fatalf("Failed to insert initial data: %v", err)
+	}
+
+	alterSQL := "ALTER TABLE products ADD COLUMN price float DEFAULT 9.99"
+	_, err = execute(alterSQL)
+	if err != nil {
+		t.Fatalf("Failed to add column with default value: %v", err)
+	}
+
+	selectSQL := "SELECT pid, pname, price FROM products"
+	result, err := execute(selectSQL)
+	if err != nil {
+		t.Fatalf("Failed to execute SELECT after adding column: %v", err)
+	}
+
+	expected := &database.QueryResult{
+		Columns: []database.Column{
+			{
+				Name:         "pid",
+				DataType:     database.TypeInteger64,
+				Length:       0,
+				IsNullable:   false,
+				IsPrimaryKey: true,
+			},
+			{
+				Name:         "pname",
+				DataType:     database.TypeString,
+				Length:       50,
+				IsNullable:   true,
+				IsPrimaryKey: false,
+			},
+			{
+				Name:       "price",
+				DataType:   database.TypeFloat64,
+				Length:     0,
+				IsNullable: true,
+			},
+		},
+		Rows: [][]any{
+			{int64(1), "Product A", 9.99},
+		},
+	}
+
+	assertSelectResult(t, result, expected, "Add Column With Data Result")
+}
+
+func TestAddColumnWithExistingData(t *testing.T) {
+	defer cleanupDB(t)
+	_, err := execute("CREATE TABLE products (pid int primary key, pname string(50))")
+	if err != nil {
+		t.Fatalf("Failed to create products table: %v", err)
+	}
+
+	_, err = execute("INSERT INTO products (pid, pname) VALUES (1, 'Product A')")
+	if err != nil {
+		t.Fatalf("Failed to insert initial data: %v", err)
+	}
+
+	alterSQL := "ALTER TABLE products ADD COLUMN price float NULL"
+	_, err = execute(alterSQL)
+	if err != nil {
+		t.Fatalf("Failed to add column without default value: %v", err)
+	}
+
+	selectSQL := "SELECT pid, pname, price FROM products"
+	result, err := execute(selectSQL)
+	if err != nil {
+		t.Fatalf("Failed to execute SELECT after adding column: %v", err)
+	}
+
+	expected := &database.QueryResult{
+		Columns: []database.Column{
+			{
+				Name:         "pid",
+				DataType:     database.TypeInteger64,
+				Length:       0,
+				IsNullable:   false,
+				IsPrimaryKey: true,
+			},
+			{
+				Name:         "pname",
+				DataType:     database.TypeString,
+				Length:       50,
+				IsNullable:   true,
+				IsPrimaryKey: false,
+			},
+			{
+				Name:       "price",
+				DataType:   database.TypeFloat64,
+				Length:     0,
+				IsNullable: true,
+			},
+		},
+		Rows: [][]any{
+			{int64(1), "Product A", nil},
+		},
+	}
+
+	assertSelectResult(t, result, expected, "Add Column With Existing Data Result")
+}
+
+func TestAddColumnWithExistingDataNoDefault(t *testing.T) {
+	defer cleanupDB(t)
+	_, err := execute("CREATE TABLE products (pid int primary key, pname string(50))")
+	if err != nil {
+		t.Fatalf("Failed to create products table: %v", err)
+	}
+
+	_, err = execute("INSERT INTO products (pid, pname) VALUES (1, 'Product A')")
+	if err != nil {
+		t.Fatalf("Failed to insert initial data: %v", err)
+	}
+
+	alterSQL := "ALTER TABLE products ADD COLUMN price float NOT NULL"
+	_, err = execute(alterSQL)
+	if err == nil {
+		t.Errorf("Expected error when adding non-nullable column without default value, got nil")
+	}
+}
+
+func TestTimestamp(t *testing.T) {
+	defer cleanupDB(t)
+	_, err := execute("CREATE TABLE events (id int primary key, event_time datetime)")
+	if err != nil {
+		t.Fatalf("Failed to create events table: %v", err)
+	}
+
+	insertSQL := "INSERT INTO events (id, event_time) VALUES (1, '2023-10-01 12:00:00')"
+	_, err = execute(insertSQL)
+	if err != nil {
+		t.Fatalf("Failed to insert row with timestamp: %v", err)
+	}
+
+	selectSQL := "SELECT id, event_time FROM events WHERE id = 1"
+	result, err := execute(selectSQL)
+	if err != nil {
+		t.Fatalf("Failed to execute SELECT with timestamp: %v", err)
+	}
+
+	expected := &database.QueryResult{
+		Columns: []database.Column{
+			{
+				Name:         "id",
+				DataType:     database.TypeInteger64,
+				Length:       0,
+				IsNullable:   false,
+				IsPrimaryKey: true,
+			},
+			{
+				Name:       "event_time",
+				DataType:   database.TypeDatetime,
+				Length:     0,
+				IsNullable: true,
+			},
+		},
+		Rows: [][]any{
+			{int64(1), time.Date(2023, 10, 1, 12, 0, 0, 0, time.UTC)},
+		},
+	}
+
+	assertSelectResult(t, result, expected, "Timestamp Result")
+}
+
+func setupLogging() {
+	logDir := filepath.Join("logs")
+	l.New("repl", logDir, l.ERROR)
+	l.New("interpreter", logDir, l.ERROR)
+	l.New("sql", logDir, l.ERROR)
+}
+
 func assertSelectResult(t *testing.T, actualResult any, expected *database.QueryResult, queryName string) {
 	t.Helper()
 	actual, ok := actualResult.(*database.QueryResult)
@@ -365,21 +687,18 @@ func assertSelectResult(t *testing.T, actualResult any, expected *database.Query
 		t.Fatalf("%s: Result is not of type *database.QueryResult, got %T", queryName, actualResult)
 	}
 
-	// Compare columns
 	if !reflect.DeepEqual(actual.Columns, expected.Columns) {
 		t.Errorf("%s: Column definitions mismatch.\nExpected: %+v\nGot: %+v",
 			queryName, expected.Columns, actual.Columns)
 		return
 	}
 
-	// Compare number of rows
 	if len(actual.Rows) != len(expected.Rows) {
 		t.Errorf("%s: Row count mismatch. Expected %d rows, got %d rows",
 			queryName, len(expected.Rows), len(actual.Rows))
 		return
 	}
 
-	// Compare rows in order
 	for i := range expected.Rows {
 		if !reflect.DeepEqual(actual.Rows[i], expected.Rows[i]) {
 			t.Errorf("%s: Row %d mismatch.\nExpected: %v\nGot: %v",

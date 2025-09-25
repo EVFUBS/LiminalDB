@@ -1,6 +1,6 @@
-package interpreter
+package common
 
-func lessThanComparison(left interface{}, right interface{}) (bool, interface{}, error) {
+func LessThanComparison(left any, right any) (bool, any, error) {
 	switch l := left.(type) {
 	case int64:
 		switch r := right.(type) {
@@ -20,7 +20,7 @@ func lessThanComparison(left interface{}, right interface{}) (bool, interface{},
 	return false, nil, nil
 }
 
-func lessThanOrEqualComparison(left interface{}, right interface{}) (bool, interface{}, error) {
+func LessThanOrEqualComparison(left any, right any) (bool, any, error) {
 	switch l := left.(type) {
 	case int64:
 		switch r := right.(type) {
@@ -40,7 +40,7 @@ func lessThanOrEqualComparison(left interface{}, right interface{}) (bool, inter
 	return false, nil, nil
 }
 
-func greaterThanComparison(left interface{}, right interface{}) (bool, interface{}, error) {
+func GreaterThanComparison(left any, right any) (bool, any, error) {
 	switch l := left.(type) {
 	case int64:
 		switch r := right.(type) {
@@ -60,7 +60,7 @@ func greaterThanComparison(left interface{}, right interface{}) (bool, interface
 	return false, nil, nil
 }
 
-func greaterThanOrEqualComparison(left interface{}, right interface{}) (bool, interface{}, error) {
+func GreaterThanOrEqualComparison(left any, right any) (bool, any, error) {
 	switch l := left.(type) {
 	case int64:
 		switch r := right.(type) {

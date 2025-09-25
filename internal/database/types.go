@@ -11,11 +11,13 @@ const (
 	TypeFloat64
 	TypeString
 	TypeBoolean
-	TypeTimestamp
+	TypeDatetime
 )
 
-const MagicNumber uint32 = 0x4D444247
-const CurrentVersion uint16 = 1
+const (
+	MagicNumber    uint32 = 0x4D444247
+	CurrentVersion uint16 = 1
+)
 
 const (
 	DatabaseDir   = "db"
@@ -34,7 +36,7 @@ type DatabaseFile struct {
 type Table struct {
 	Header   FileHeader
 	Metadata TableMetadata
-	Data     [][]interface{}
+	Data     [][]any
 }
 
 type FileHeader struct {
@@ -56,12 +58,15 @@ type TableMetadata struct {
 type Column struct {
 	Name         string
 	DataType     ColumnType
-	Length       uint16 // For variable-length types like strings
+	Length       uint16
 	IsNullable   bool
 	IsPrimaryKey bool
+	DefaultValue any
+	Null         bool
 }
 
 type ForeignKeyConstraint struct {
+	Name              string
 	ReferencedTable   string
 	ReferencedColumns []ForeignKeyReference
 }
@@ -82,7 +87,7 @@ type ColumnType int8
 
 type QueryResult struct {
 	Columns []Column
-	Rows    [][]interface{}
+	Rows    [][]any
 }
 
 func (m *TableMetadata) ValidateMetadata() error {
@@ -147,7 +152,7 @@ func (c ColumnType) String() string {
 		return "STRING"
 	case TypeBoolean:
 		return "BOOL"
-	case TypeTimestamp:
+	case TypeDatetime:
 		return "TIMESTAMP"
 	default:
 		return "UNKNOWN"

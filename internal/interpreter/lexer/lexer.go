@@ -1,6 +1,10 @@
-package interpreter
+package lexer
 
-import "strings"
+import (
+	. "LiminalDb/internal/common"
+	"regexp"
+	"strings"
+)
 
 type Lexer struct {
 	input        string
@@ -10,9 +14,22 @@ type Lexer struct {
 }
 
 func NewLexer(input string) *Lexer {
-	l := &Lexer{input: input}
+	l := &Lexer{
+		input:        input,
+		position:     0,
+		readPosition: 0,
+		ch:           0,
+	}
 	l.readChar()
 	return l
+}
+
+func (l *Lexer) SetInput(input string) {
+	l.input = input
+	l.position = 0
+	l.readPosition = 0
+	l.ch = 0
+	l.readChar()
 }
 
 func (l *Lexer) readChar() {
@@ -63,8 +80,14 @@ func (l *Lexer) NextToken() Token {
 	case '/':
 		tok = newToken(DIVIDE, l.ch)
 	case '\'':
-		tok.Type = STRING
-		tok.Literal = l.readString()
+		strVal := l.readString()
+		if isDateTimeString(strVal) {
+			tok.Type = DATETIME
+			tok.Literal = strVal
+		} else {
+			tok.Type = STRING
+			tok.Literal = strVal
+		}
 		return tok
 	case '<':
 		if l.peekChar() == '=' {
@@ -114,14 +137,6 @@ func (l *Lexer) readIdentifier() string {
 	return l.input[position:l.position]
 }
 
-func (l *Lexer) readNumber() string {
-	position := l.position
-	for isDigit(l.ch) {
-		l.readChar()
-	}
-	return l.input[position:l.position]
-}
-
 func (l *Lexer) skipWhitespace() {
 	for l.ch == ' ' || l.ch == '\t' || l.ch == '\n' || l.ch == '\r' {
 		l.readChar()
@@ -151,81 +166,6 @@ type Token struct {
 	Literal string
 }
 
-const (
-	ILLEGAL = "ILLEGAL"
-	EOF     = "EOF"
-
-	// Identifiers + literals
-	IDENT  = "IDENT"  // add, foobar, x, y, ...
-	INT    = "INT"    // 1343456
-	STRING = "STRING" // "foo bar"
-	FLOAT  = "FLOAT"  // 123.456
-	BOOL   = "BOOL"   // true, false
-	ALL    = "ALL"    // For SELECT * queries
-
-	// Types
-	INTTYPE    = "INT"
-	FLOATTYPE  = "FLOAT"
-	BOOLTYPE   = "BOOL"
-	STRINGTYPE = "STRING"
-
-	// Operators
-	ASSIGN   = "="
-	PLUS     = "+"
-	MINUS    = "-"
-	MULTIPLY = "*"
-	DIVIDE   = "/"
-
-	// Comparison Operators
-	LESS_THAN          = "<"
-	LESS_THAN_OR_EQ    = "<="
-	GREATER_THAN       = ">"
-	GREATER_THAN_OR_EQ = ">="
-
-	// Delimiters
-	COMMA     = ","
-	SEMICOLON = ";"
-	LPAREN    = "("
-	RPAREN    = ")"
-
-	// Keywords
-	SELECT     = "SELECT"
-	FROM       = "FROM"
-	WHERE      = "WHERE"
-	INSERT     = "INSERT"
-	INTO       = "INTO"
-	VALUES     = "VALUES"
-	CREATE     = "CREATE"
-	TABLE      = "TABLE"
-	DROP       = "DROP"
-	NULL       = "NULL"
-	NOT        = "NOT"
-	DELETE     = "DELETE"
-	DESC       = "DESC"
-	PRIMARY    = "PRIMARY"
-	KEY        = "KEY"
-	FOREIGN    = "FOREIGN"
-	REFERENCES = "REFERENCES"
-	ON         = "ON"
-	INDEX      = "INDEX"
-	UNIQUE     = "UNIQUE"
-	SHOW       = "SHOW"
-	INDEXES    = "INDEXES"
-	AND        = "AND"
-	OR         = "OR"
-
-	// Stored Procedure Keywords
-	PROCEDURE = "PROCEDURE"
-	ALTER     = "ALTER"
-	AS        = "AS"
-	BEGIN     = "BEGIN"
-	END       = "END"
-	EXEC      = "EXEC"
-
-	// Variables
-	VARIABLE = "@" // For variables like @user_id
-)
-
 var keywords = map[string]TokenType{
 	"select":     SELECT,
 	"from":       FROM,
@@ -238,10 +178,13 @@ var keywords = map[string]TokenType{
 	"create":     CREATE,
 	"table":      TABLE,
 	"drop":       DROP,
-	"int":        INTTYPE,
-	"float":      FLOATTYPE,
-	"bool":       BOOLTYPE,
-	"string":     STRINGTYPE,
+	"update":     UPDATE,
+	"set":        SET,
+	"int":        INT,
+	"float":      FLOAT,
+	"bool":       BOOL,
+	"string":     STRING,
+	"datetime":   DATETIME,
 	"null":       NULL,
 	"not":        NOT,
 	"delete":     DELETE,
@@ -272,6 +215,13 @@ var keywords = map[string]TokenType{
 	">=":         GREATER_THAN_OR_EQ,
 	"and":        AND,
 	"or":         OR,
+	"constraint": CONSTRAINT,
+	"column":     COLUMN,
+	"default":    DEFAULT,
+	"add":        ADD,
+	"tran":       TRAN,
+	"commit":     COMMIT,
+	"rollback":   ROLLBACK,
 }
 
 func LookupIdent(ident string) TokenType {
@@ -292,9 +242,27 @@ func (l *Lexer) readString() string {
 	}
 
 	value := l.input[position:l.position]
-	l.readChar()
+	if l.ch == '\'' {
+		l.readChar()
+	}
 
 	return value
+}
+
+func isDateTimeString(s string) bool {
+	fullDateTimePattern := `^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$`
+	dateTimeNoSecondsPattern := `^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$`
+	datePattern := `^\d{4}-\d{2}-\d{2}$`
+	if matched, _ := regexp.MatchString(fullDateTimePattern, s); matched {
+		return true
+	}
+	if matched, _ := regexp.MatchString(dateTimeNoSecondsPattern, s); matched {
+		return true
+	}
+	if matched, _ := regexp.MatchString(datePattern, s); matched {
+		return true
+	}
+	return false
 }
 
 func (l *Lexer) readNumberToken() Token {
@@ -302,16 +270,13 @@ func (l *Lexer) readNumberToken() Token {
 	startPos := l.position
 	isFloat := false
 
-	// Read the integer part
 	for isDigit(l.ch) {
 		l.readChar()
 	}
 
-	// Check for decimal point
 	if l.ch == '.' {
 		isFloat = true
 		l.readChar()
-		// Read decimal places
 		for isDigit(l.ch) {
 			l.readChar()
 		}

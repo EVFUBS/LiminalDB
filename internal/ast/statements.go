@@ -1,8 +1,10 @@
 package ast
 
-import "LiminalDb/internal/database"
+import (
+	"LiminalDb/internal/database"
+)
 
-type Statement interface{}
+type Statement any
 
 type SelectStatement struct {
 	Fields    []string
@@ -16,9 +18,16 @@ type InsertStatement struct {
 	ValueLists [][]Expression
 }
 
-type CreateTableStatement struct {
+type UpdateStatement struct {
 	TableName string
-	Columns   []database.Column
+	Values    []Expression
+	Where     Expression
+}
+
+type CreateTableStatement struct {
+	TableName   string
+	Columns     []database.Column
+	ForeignKeys []database.ForeignKeyConstraint
 }
 
 type DeleteStatement struct {
@@ -68,3 +77,26 @@ type ExecStatement struct {
 	Name       string
 	Parameters []Expression
 }
+
+type AlterTableStatement struct {
+	TableName      string
+	Columns        []database.Column
+	ForeignKeys    []database.ForeignKeyConstraint
+	ConstraintName string
+	DropConstraint bool
+	AddConstraint  bool
+	DropColumn     bool
+	AddColumn      bool
+	DropIndex      bool
+	AddIndex       bool
+}
+
+type TransactionStatement struct {
+	Statements []Statement
+}
+
+type BeginStatement struct{}
+
+type CommitStatement struct{}
+
+type RollbackStatement struct{}

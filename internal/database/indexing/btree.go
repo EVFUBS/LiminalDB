@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -16,7 +17,7 @@ const (
 
 type BTreeNode struct {
 	IsLeaf   bool
-	Keys     []interface{}
+	Keys     []any
 	Values   [][]int64 // Row IDs for each key (can have duplicates for non-unique indexes)
 	Children []*BTreeNode
 }
@@ -54,14 +55,14 @@ func NewIndex(name string, tableName string, columns []string, isUnique bool) *I
 	}
 }
 
-func (t *BTree) Search(key interface{}) ([]int64, bool) {
+func (t *BTree) Search(key any) ([]int64, bool) {
 	if t.Root == nil {
 		return nil, false
 	}
 	return t.searchNode(t.Root, key)
 }
 
-func (t *BTree) searchNode(node *BTreeNode, key interface{}) ([]int64, bool) {
+func (t *BTree) searchNode(node *BTreeNode, key any) ([]int64, bool) {
 	i := 0
 	for i < len(node.Keys) && compareKeys(node.Keys[i], key) < 0 {
 		i++
@@ -78,7 +79,7 @@ func (t *BTree) searchNode(node *BTreeNode, key interface{}) ([]int64, bool) {
 	return t.searchNode(node.Children[i], key)
 }
 
-func (t *BTree) Insert(key interface{}, rowID int64) error {
+func (t *BTree) Insert(key any, rowID int64) error {
 	if len(t.Root.Keys) == 2*t.Degree-1 {
 		newRoot := &BTreeNode{IsLeaf: false}
 		newRoot.Children = append(newRoot.Children, t.Root)
@@ -88,7 +89,7 @@ func (t *BTree) Insert(key interface{}, rowID int64) error {
 	return t.insertNonFull(t.Root, key, rowID)
 }
 
-func (t *BTree) insertNonFull(node *BTreeNode, key interface{}, rowID int64) error {
+func (t *BTree) insertNonFull(node *BTreeNode, key any, rowID int64) error {
 	i := len(node.Keys) - 1
 
 	if node.IsLeaf {
@@ -138,6 +139,9 @@ func (t *BTree) splitChild(parent *BTreeNode, childIndex int) {
 	newChild := &BTreeNode{IsLeaf: child.IsLeaf}
 
 	midIndex := t.Degree - 1
+	midKey := child.Keys[midIndex]
+	midValue := child.Values[midIndex]
+
 	newChild.Keys = append(newChild.Keys, child.Keys[midIndex+1:]...)
 	newChild.Values = append(newChild.Values, child.Values[midIndex+1:]...)
 
@@ -157,12 +161,12 @@ func (t *BTree) splitChild(parent *BTreeNode, childIndex int) {
 	copy(parent.Values[childIndex+1:], parent.Values[childIndex:])
 	copy(parent.Children[childIndex+2:], parent.Children[childIndex+1:])
 
-	parent.Keys[childIndex] = child.Keys[midIndex]
-	parent.Values[childIndex] = child.Values[midIndex]
+	parent.Keys[childIndex] = midKey
+	parent.Values[childIndex] = midValue
 	parent.Children[childIndex+1] = newChild
 }
 
-func (t *BTree) Delete(key interface{}, rowID int64) error {
+func (t *BTree) Delete(key any, rowID int64) error {
 	if t.Root == nil {
 		return errors.New("tree is empty")
 	}
@@ -176,7 +180,7 @@ func (t *BTree) Delete(key interface{}, rowID int64) error {
 	return err
 }
 
-func (t *BTree) deleteFromNode(node *BTreeNode, key interface{}, rowID int64) error {
+func (t *BTree) deleteFromNode(node *BTreeNode, key any, rowID int64) error {
 	i := 0
 	for i < len(node.Keys) && compareKeys(node.Keys[i], key) < 0 {
 		i++
@@ -197,8 +201,8 @@ func (t *BTree) deleteFromNode(node *BTreeNode, key interface{}, rowID int64) er
 				return nil
 			}
 
-			node.Keys = append(node.Keys[:i], node.Keys[i+1:]...)
-			node.Values = append(node.Values[:i], node.Values[i+1:]...)
+			node.Keys = slices.Delete(node.Keys, i, i+1)
+			node.Values = slices.Delete(node.Values, i, i+1)
 		} else {
 			pred, predValues := t.getPredecessor(node, i)
 			node.Keys[i] = pred
@@ -224,7 +228,7 @@ func (t *BTree) deleteFromNode(node *BTreeNode, key interface{}, rowID int64) er
 	return nil
 }
 
-func (t *BTree) getPredecessor(node *BTreeNode, index int) (interface{}, []int64) {
+func (t *BTree) getPredecessor(node *BTreeNode, index int) (any, []int64) {
 	current := node.Children[index]
 	for !current.IsLeaf {
 		current = current.Children[len(current.Children)-1]
@@ -305,13 +309,13 @@ func (t *BTree) mergeChildren(node *BTreeNode, index int) {
 		child.Children = append(child.Children, sibling.Children...)
 	}
 
-	node.Keys = append(node.Keys[:index], node.Keys[index+1:]...)
-	node.Values = append(node.Values[:index], node.Values[index+1:]...)
+	node.Keys = slices.Delete(node.Keys, index, index+1)
+	node.Values = slices.Delete(node.Values, index, index+1)
 
-	node.Children = append(node.Children[:index+1], node.Children[index+2:]...)
+	node.Children = slices.Delete(node.Children, index+1, index+2)
 }
 
-func compareKeys(a, b interface{}) int {
+func compareKeys(a, b any) int {
 	switch aVal := a.(type) {
 	case int64:
 		if bVal, ok := b.(int64); ok {
@@ -478,23 +482,19 @@ func serializeBTree(tree *BTree) ([]byte, error) {
 	// A real implementation would need to handle the tree structure properly
 	buf := new(bytes.Buffer)
 
-	// Write degree
 	if err := binary.Write(buf, binary.LittleEndian, int32(tree.Degree)); err != nil {
 		return nil, err
 	}
 
-	// Serialize the root node
 	nodeBytes, err := serializeNode(tree.Root)
 	if err != nil {
 		return nil, err
 	}
 
-	// Write node size
 	if err := binary.Write(buf, binary.LittleEndian, uint32(len(nodeBytes))); err != nil {
 		return nil, err
 	}
 
-	// Write node
 	if _, err := buf.Write(nodeBytes); err != nil {
 		return nil, err
 	}
@@ -508,19 +508,15 @@ func serializeNode(node *BTreeNode) ([]byte, error) {
 	// A real implementation would need to handle the node structure properly
 	buf := new(bytes.Buffer)
 
-	// Write isLeaf flag
 	if err := binary.Write(buf, binary.LittleEndian, node.IsLeaf); err != nil {
 		return nil, err
 	}
 
-	// Write key count
 	if err := binary.Write(buf, binary.LittleEndian, uint16(len(node.Keys))); err != nil {
 		return nil, err
 	}
 
-	// Write keys and values
 	for i, key := range node.Keys {
-		// Serialize key based on type
 		switch k := key.(type) {
 		case int64:
 			if err := binary.Write(buf, binary.LittleEndian, byte(0)); err != nil {
@@ -562,12 +558,10 @@ func serializeNode(node *BTreeNode) ([]byte, error) {
 			return nil, fmt.Errorf("unsupported key type: %T", key)
 		}
 
-		// Write value count
 		if err := binary.Write(buf, binary.LittleEndian, uint16(len(node.Values[i]))); err != nil {
 			return nil, err
 		}
 
-		// Write values
 		for _, v := range node.Values[i] {
 			if err := binary.Write(buf, binary.LittleEndian, v); err != nil {
 				return nil, err
@@ -575,24 +569,20 @@ func serializeNode(node *BTreeNode) ([]byte, error) {
 		}
 	}
 
-	// Write child count
 	if err := binary.Write(buf, binary.LittleEndian, uint16(len(node.Children))); err != nil {
 		return nil, err
 	}
 
-	// Write children recursively
 	for _, child := range node.Children {
 		childBytes, err := serializeNode(child)
 		if err != nil {
 			return nil, err
 		}
 
-		// Write child size
 		if err := binary.Write(buf, binary.LittleEndian, uint32(len(childBytes))); err != nil {
 			return nil, err
 		}
 
-		// Write child
 		if _, err := buf.Write(childBytes); err != nil {
 			return nil, err
 		}
@@ -605,25 +595,21 @@ func serializeNode(node *BTreeNode) ([]byte, error) {
 func deserializeBTree(data []byte) (*BTree, error) {
 	buf := bytes.NewReader(data)
 
-	// Read degree
 	var degree int32
 	if err := binary.Read(buf, binary.LittleEndian, &degree); err != nil {
 		return nil, err
 	}
 
-	// Read node size
 	var nodeSize uint32
 	if err := binary.Read(buf, binary.LittleEndian, &nodeSize); err != nil {
 		return nil, err
 	}
 
-	// Read node
 	nodeBytes := make([]byte, nodeSize)
 	if _, err := buf.Read(nodeBytes); err != nil {
 		return nil, err
 	}
 
-	// Deserialize the root node
 	root, err := deserializeNode(nodeBytes)
 	if err != nil {
 		return nil, err
@@ -635,38 +621,31 @@ func deserializeBTree(data []byte) (*BTree, error) {
 	}, nil
 }
 
-// deserializeNode deserializes a B-tree node from bytes
 func deserializeNode(data []byte) (*BTreeNode, error) {
 	buf := bytes.NewReader(data)
 
-	// Read isLeaf flag
 	var isLeaf bool
 	if err := binary.Read(buf, binary.LittleEndian, &isLeaf); err != nil {
 		return nil, err
 	}
 
-	// Read key count
 	var keyCount uint16
 	if err := binary.Read(buf, binary.LittleEndian, &keyCount); err != nil {
 		return nil, err
 	}
 
-	// Create node
 	node := &BTreeNode{
 		IsLeaf: isLeaf,
-		Keys:   make([]interface{}, keyCount),
+		Keys:   make([]any, keyCount),
 		Values: make([][]int64, keyCount),
 	}
 
-	// Read keys and values
 	for i := uint16(0); i < keyCount; i++ {
-		// Read key type
 		var keyType byte
 		if err := binary.Read(buf, binary.LittleEndian, &keyType); err != nil {
 			return nil, err
 		}
 
-		// Read key based on type
 		switch keyType {
 		case 0: // int64
 			var k int64
@@ -700,13 +679,11 @@ func deserializeNode(data []byte) (*BTreeNode, error) {
 			return nil, fmt.Errorf("unsupported key type: %d", keyType)
 		}
 
-		// Read value count
 		var valueCount uint16
 		if err := binary.Read(buf, binary.LittleEndian, &valueCount); err != nil {
 			return nil, err
 		}
 
-		// Read values
 		values := make([]int64, valueCount)
 		for j := uint16(0); j < valueCount; j++ {
 			if err := binary.Read(buf, binary.LittleEndian, &values[j]); err != nil {
@@ -716,28 +693,23 @@ func deserializeNode(data []byte) (*BTreeNode, error) {
 		node.Values[i] = values
 	}
 
-	// Read child count
 	var childCount uint16
 	if err := binary.Read(buf, binary.LittleEndian, &childCount); err != nil {
 		return nil, err
 	}
 
-	// Read children
 	node.Children = make([]*BTreeNode, childCount)
 	for i := uint16(0); i < childCount; i++ {
-		// Read child size
 		var childSize uint32
 		if err := binary.Read(buf, binary.LittleEndian, &childSize); err != nil {
 			return nil, err
 		}
 
-		// Read child
 		childBytes := make([]byte, childSize)
 		if _, err := buf.Read(childBytes); err != nil {
 			return nil, err
 		}
 
-		// Deserialize child
 		child, err := deserializeNode(childBytes)
 		if err != nil {
 			return nil, err

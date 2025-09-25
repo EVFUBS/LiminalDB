@@ -4,7 +4,6 @@ import (
 	"LiminalDb/internal/ast"
 	"LiminalDb/internal/database"
 	"LiminalDb/internal/database/indexing"
-	"LiminalDb/internal/logger"
 	"fmt"
 	"strings"
 )
@@ -12,7 +11,7 @@ import (
 type ReadRowRequest struct {
 	TableName string
 	Fields    []string
-	Filter    func([]interface{}, []database.Column) (bool, error)
+	Filter    func([]any, []database.Column) (bool, error)
 	Where     ast.Expression
 }
 
@@ -27,69 +26,74 @@ type IndexQuery struct {
 	IndexKey      any
 }
 
-func (o *OperationsImpl) ReadMetadata(filename string) (database.TableMetadata, error) {
-	logger.Debug("Reading metadata for table: %s", filename)
+func (o *OperationsImpl) ReadMetadata(op *Operation) *Result {
+	logger.Debug("Reading metadata for table: %s", op.TableName)
 
-	table, err := o.Serializer.ReadTableFromFile(filename)
+	table, err := o.Serializer.ReadTableFromFile(op.TableName)
 	if err != nil {
-		logger.Error("Failed to read metadata for table %s: %v", filename, err)
-		return database.TableMetadata{}, err
+		logger.Error("Failed to read metadata for table %s: %v", op.TableName, err)
+		return &Result{Err: err}
 	}
 
-	logger.Debug("Successfully read metadata for table %s", filename)
-	return table.Metadata, nil
+	logger.Debug("Successfully read metadata for table %s", op.TableName)
+	return &Result{Metadata: &table.Metadata}
 }
 
-func (o *OperationsImpl) ReadRows(tableName string, columns []string, filter func([]interface{}, []database.Column) (bool, error), where ast.Expression) (*database.QueryResult, error) {
-	logger.Debug("Reading rows from table: %s", tableName)
+func (o *OperationsImpl) ReadRows(op *Operation) *Result {
+	logger.Debug("Reading rows from table: %s", op.TableName)
 
-	table, err := o.Serializer.ReadTableFromFile(tableName)
+	table, err := o.Serializer.ReadTableFromFile(op.TableName)
 	if err != nil {
-		logger.Error("Failed to read rows from table %s: %v", tableName, err)
-		return &database.QueryResult{}, err
+		logger.Error("Failed to read rows from table %s: %v", op.TableName, err)
+		return &Result{Err: err}
 	}
 
-	filteredColumns := filterColumns(columns, table.Metadata.Columns)
-
-	result := &database.QueryResult{
-		Columns: filteredColumns,
+	// this needs to be unified
+	columnsToUse := op.Fields
+	if len(columnsToUse) == 0 {
+		columnsToUse = op.ColumnNames
 	}
 
-	indexInfo, indexKey := o.findBestIndex(table, filter, where)
-	if indexInfo != nil && indexKey != nil {
-		logger.Debug("Using index %s for query on table %s", indexInfo.Name, tableName)
+	result := BuildResultWithFilteredColumns(columnsToUse, table.Metadata.Columns)
 
-		index, err := o.loadIndex(tableName, indexInfo.Name)
-		if err != nil {
-			logger.Error("Failed to load index %s: %v", indexInfo.Name, err)
-		} else {
-			result, err = o.findRowsByIndex(&IndexQuery{
-				Table:         table,
-				TableName:     tableName,
-				Fields:        columns,
-				Result:        result,
-				Filter:        filter,
-				Index:         index,
-				IndexMetaData: indexInfo,
-				IndexKey:      indexKey,
-			})
-
-			if err != nil {
-				logger.Error("Failed to find rows using index %s: %v", indexInfo.Name, err)
-			}
-
-			if result != nil {
-				return result, nil
-			}
-		}
+	indexResult, err := o.ReadRowsUsingIndex(&IndexQuery{
+		Table:         table,
+		TableName:     op.TableName,
+		Fields:        columnsToUse,
+		Result:        result,
+		Filter:        op.Filter,
+		Index:         nil,
+		IndexMetaData: nil,
+		IndexKey:      nil,
+	}, op.Where)
+	if err != nil {
+		logger.Error("Failed to read rows using index: %v", err)
+		return &Result{Err: err}
 	}
 
-	logger.Debug("Performing full table scan on table %s", tableName)
+	if indexResult != nil {
+		return &Result{Data: indexResult}
+	}
+
+	logger.Debug("No suitable index found for query on table %s", op.TableName)
+
+	result, err = o.ReadRowsFullScan(table, columnsToUse, op.Filter, result)
+	if err != nil {
+		logger.Error("Failed to perform full table scan: %v", err)
+		return &Result{Err: err}
+	}
+
+	logger.Debug("Successfully read %d rows from table %s", len(result.Rows), op.TableName)
+	return &Result{Data: result}
+}
+
+func (o *OperationsImpl) ReadRowsFullScan(table *database.Table, columns []string, filter Filter, result *database.QueryResult) (*database.QueryResult, error) {
+	logger.Debug("Reading rows from table: %s", table.Metadata.Name)
+	logger.Debug("Performing full table scan on table %s", table.Metadata.Name)
 	for _, row := range table.Data {
-		selectedRow, err := o.selectRowColumns(row, columns, table, filter)
-
+		selectedRow, err := o.ReadRowFilterWithRequestedColumns(row, columns, table, filter)
 		if err != nil {
-			logger.Error("Failed to select row columns from table %s: %v", tableName, err)
+			logger.Error("Failed to select row columns from table %s: %v", table.Metadata.Name, err)
 			return nil, err
 		}
 
@@ -100,8 +104,34 @@ func (o *OperationsImpl) ReadRows(tableName string, columns []string, filter fun
 		result.Rows = append(result.Rows, selectedRow)
 	}
 
-	logger.Debug("Successfully read %d rows from table %s", len(result.Rows), tableName)
 	return result, nil
+}
+
+func (o *OperationsImpl) ReadRowsUsingIndex(indexQuery *IndexQuery, where ast.Expression) (*database.QueryResult, error) {
+	logger.Debug("Finding best index for query on table %s", indexQuery.TableName)
+	indexInfo, indexKey := o.findBestIndexColumn(indexQuery.Table, where)
+
+	if indexInfo != nil && indexKey != nil {
+		index, err := o.loadIndex(indexQuery.TableName, indexInfo.Name)
+		if err != nil {
+			logger.Error("Failed to load index %s: %v", indexInfo.Name, err)
+		} else {
+			indexQuery.Index = index
+			indexQuery.IndexMetaData = indexInfo
+			indexQuery.IndexKey = indexKey
+
+			result, err := o.findRowsByIndex(indexQuery)
+			if err != nil {
+				logger.Error("Failed to find rows using index %s: %v", indexInfo.Name, err)
+			}
+
+			if result != nil {
+				return result, nil
+			}
+		}
+	}
+
+	return nil, nil
 }
 
 func (o *OperationsImpl) findRowsByIndex(indexQuery *IndexQuery) (*database.QueryResult, error) {
@@ -126,7 +156,7 @@ func (o *OperationsImpl) findRowsByIndex(indexQuery *IndexQuery) (*database.Quer
 				}
 			}
 
-			selectedRow, err := o.selectRowColumns(row, indexQuery.Fields, indexQuery.Table, nil)
+			selectedRow, err := o.ReadRowFilterWithRequestedColumns(row, indexQuery.Fields, indexQuery.Table, nil)
 			if err != nil {
 				logger.Error("Failed to select row fields: %v", err)
 				return nil, err
@@ -145,7 +175,7 @@ func (o *OperationsImpl) findRowsByIndex(indexQuery *IndexQuery) (*database.Quer
 	return nil, nil
 }
 
-func (o *OperationsImpl) selectRowColumns(row []any, columns []string, table *database.Table, filter func([]any, []database.Column) (bool, error)) ([]any, error) {
+func (o *OperationsImpl) ReadRowFilterWithRequestedColumns(row []any, columns []string, table *database.Table, filter func([]any, []database.Column) (bool, error)) ([]any, error) {
 	if filter != nil {
 		matches, err := filter(row, table.Metadata.Columns)
 		if err != nil {
@@ -188,9 +218,11 @@ func buildColumnMap(columns []database.Column) map[string]int {
 	return columnMap
 }
 
-func filterColumns(columns []string, tableColumns []database.Column) []database.Column {
+func BuildResultWithFilteredColumns(columns []string, tableColumns []database.Column) *database.QueryResult {
 	if isWildcard(columns) {
-		return tableColumns
+		return &database.QueryResult{
+			Columns: tableColumns,
+		}
 	}
 
 	columnMap := make(map[string]struct{})
@@ -204,5 +236,10 @@ func filterColumns(columns []string, tableColumns []database.Column) []database.
 			filteredColumns = append(filteredColumns, col)
 		}
 	}
-	return filteredColumns
+
+	result := &database.QueryResult{
+		Columns: filteredColumns,
+	}
+
+	return result
 }
