@@ -1,13 +1,13 @@
 package transaction
 
 import (
-	"LiminalDb/internal/ast"
 	"LiminalDb/internal/database/operations"
 )
 
 type Change struct {
-	Statement ast.Statement
-	Operation operations.Operation
+	Operation *operations.Operation
+	Ran       bool
 	Commit    bool
 	Rollback  bool
+	Locks     map[string]Lock
 }

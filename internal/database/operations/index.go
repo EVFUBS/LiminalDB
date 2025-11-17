@@ -124,18 +124,18 @@ func findUniqueIndex(candidates []candidateIndex) *candidateIndex {
 	return nil
 }
 
-func (o *OperationsImpl) CreateIndex(op *Operation) error {
+func (o *OperationsImpl) CreateIndex(op *Operation) *Result {
 	logger.Info("Creating index %s on table %s", op.IndexName, op.TableName)
 
 	table, err := o.Serializer.ReadTableFromFile(op.TableName)
 	if err != nil {
 		logger.Error("Failed to read table %s: %v", op.TableName, err)
-		return err
+		return &Result{Err: err}
 	}
 
 	for _, idx := range table.Metadata.Indexes {
 		if idx.Name == op.IndexName {
-			return fmt.Errorf("index %s already exists on table %s", op.IndexName, op.TableName)
+			return &Result{Err: fmt.Errorf("index %s already exists on table %s", op.IndexName, op.TableName)}
 		}
 	}
 
@@ -148,7 +148,7 @@ func (o *OperationsImpl) CreateIndex(op *Operation) error {
 			}
 		}
 		if !found {
-			return fmt.Errorf("column %s not found in table %s", col, op.TableName)
+			return &Result{Err: fmt.Errorf("column %s not found in table %s", col, op.TableName)}
 		}
 	}
 
@@ -175,15 +175,15 @@ func (o *OperationsImpl) CreateIndex(op *Operation) error {
 
 	err = o.insertIndexIntoTree(table, index, op.ColumnNames)
 	if err != nil {
-		return err
+		return &Result{Err: err}
 	}
 
 	err = o.SaveIndexToFile(index, op.TableName, op.IndexName)
 	if err != nil {
-		return err
+		return &Result{Err: err}
 	}
 
-	return o.Serializer.WriteTableToFile(table, op.TableName)
+	return &Result{}
 }
 
 func (o *OperationsImpl) SaveIndexToFile(index *indexing.Index, tableName string, indexName string) error {
@@ -239,16 +239,16 @@ func (o *OperationsImpl) DropIndex(op *Operation) *Result {
 	return &Result{}
 }
 
-func (o *OperationsImpl) ListIndexes(op *Operation) Result {
+func (o *OperationsImpl) ListIndexes(op *Operation) *Result {
 	logger.Debug("Listing indexes for table %s", op.TableName)
 
 	table, err := o.Serializer.ReadTableFromFile(op.TableName)
 	if err != nil {
 		logger.Error("Failed to read table %s: %v", op.TableName, err)
-		return Result{Err: err}
+		return &Result{Err: err}
 	}
 
-	return Result{IndexMetaData: table.Metadata.Indexes}
+	return &Result{IndexMetaData: table.Metadata.Indexes}
 }
 
 func (o *OperationsImpl) loadIndex(tableName string, indexName string) (*indexing.Index, error) {

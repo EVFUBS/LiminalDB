@@ -2,386 +2,316 @@ package eval
 
 import (
 	"LiminalDb/internal/ast"
+	"LiminalDb/internal/common"
 	"LiminalDb/internal/database"
 	ops "LiminalDb/internal/database/operations"
-	"LiminalDb/internal/database/transaction"
-	"LiminalDb/internal/storedproc"
+	"LiminalDb/internal/storedprocedure"
 	"fmt"
-	"strings"
 )
 
-func (e *Evaluator) executeStatement(stmt ast.Statement) (any, error) {
+func (e *Evaluator) evaluateStatement(stmt ast.Statement) (*[]ops.Operation, error) {
 	logger.Debug("Executing statement of type: %T", stmt)
 
 	switch stmt := stmt.(type) {
 	case *ast.SelectStatement:
-		return e.executeSelect(stmt)
+		return wrapOperationInArray(e.evaluateSelect(stmt)), nil
 	case *ast.InsertStatement:
-		return e.executeInsert(stmt)
+		return wrapOperationInArray(e.evaluateInsert(stmt)), nil
 	case *ast.CreateTableStatement:
-		return e.executeCreateTable(stmt)
+		return wrapOperationInArray(e.evaluateCreateTable(stmt)), nil
 	case *ast.UpdateStatement:
-		return e.executeUpdate(stmt)
+		return wrapOperationInArray(e.evaluateUpdate(stmt)), nil
 	case *ast.DeleteStatement:
-		return e.executeDelete(stmt)
+		return wrapOperationInArray(e.evaluateDelete(stmt)), nil
 	case *ast.DropTableStatement:
-		return e.executeDropTable(stmt)
+		return wrapOperationInArray(e.evaluateDropTable(stmt)), nil
 	case *ast.DescribeTableStatement:
-		return e.executeDescribeTable(stmt)
+		return wrapOperationInArray(e.evaluateDescribeTable(stmt)), nil
 	case *ast.CreateProcedureStatement:
-		return e.executeCreateProcedure(stmt)
+		return wrapOperationInArray(e.executeCreateProcedure(stmt)), nil
 	case *ast.AlterProcedureStatement:
-		return e.executeAlterProcedure(stmt)
+		return wrapOperationInArray(e.executeAlterProcedure(stmt)), nil
 	case *ast.ExecStatement:
-		return e.executeStoredProcedure(stmt)
+		return wrapOperationInArray(e.executeStoredProcedure(stmt)), nil
 	case *ast.CreateIndexStatement:
-		return e.executeCreateIndex(stmt)
+		return wrapOperationInArray(e.evaluateCreateIndex(stmt)), nil
 	case *ast.DropIndexStatement:
-		return e.executeDropIndex(stmt)
+		return wrapOperationInArray(e.evaluateDropIndex(stmt)), nil
 	case *ast.ShowIndexesStatement:
-		return e.executeShowIndexes(stmt)
+		return wrapOperationInArray(e.evaluateShowIndexes(stmt)), nil
 	case *ast.AlterTableStatement:
-		return e.executeAlterTable(stmt)
+		return e.evaluateAlterTable(stmt)
 	case *ast.TransactionStatement:
-		return e.executeTransaction(stmt)
+		return e.evaluateTransaction(stmt)
 	default:
 		logger.Error("Unsupported statement type: %T", stmt)
 		return nil, fmt.Errorf("unsupported statement type")
 	}
 }
 
-func (e *Evaluator) executeSelect(stmt *ast.SelectStatement) (*database.QueryResult, error) {
-	logger.Debug("Executing SELECT statement on table: %s", stmt.TableName)
-
-	data, err := e.selectData(stmt.TableName, stmt.Fields, stmt.Where)
+func wrapOperationInArray(op *ops.Operation, err error) *[]ops.Operation {
 	if err != nil {
-		logger.Error("Failed to execute SELECT statement: %v", err)
-		return nil, err
+		return &[]ops.Operation{}
 	}
-
-	logger.Debug("SELECT statement executed successfully")
-	return data, nil
+	return &[]ops.Operation{*op}
 }
 
-func (e *Evaluator) executeUpdate(stmt *ast.UpdateStatement) (any, error) {
+func (e *Evaluator) evaluateSelect(stmt *ast.SelectStatement) (*ops.Operation, error) {
+	logger.Debug("Built SELECT operation with fields: %s, where: %s", stmt.Fields, stmt.Where)
+	operation := &ops.Operation{TableName: stmt.TableName, Fields: stmt.Fields, Where: stmt.Where, Filter: e.filter(stmt.Where), ExecuteMethod: e.operations.ReadRows, Type: common.Read}
+	return operation, nil
+}
+
+func (e *Evaluator) evaluateUpdate(stmt *ast.UpdateStatement) (*ops.Operation, error) {
+	logger.Debug("Evaluating Update statement for table: %s", stmt.TableName)
 	data, err := buildUpdateData(stmt.Values)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build update data: %w", err)
 	}
 
-	logger.Debug("Executing UPDATE statement on table: %s", stmt.TableName)
-	result := e.operations.UpdateRows(&ops.Operation{TableName: stmt.TableName, Data: ops.Data{Update: data}, Filter: e.filter(stmt.Where)})
-	if result.Err != nil {
-		return nil, fmt.Errorf("failed to update table: %w", result.Err)
-	}
+	operation := &ops.Operation{TableName: stmt.TableName, Data: ops.Data{Update: data}, Filter: e.filter(stmt.Where), ExecuteMethod: e.operations.UpdateRows, Type: common.Alter}
 
-	return "Update successful", nil
+	logger.Debug("Built UPDATE operation with fields: %s, where: %s", stmt.Values, stmt.Where)
+	return operation, nil
 }
 
-func (e *Evaluator) executeInsert(stmt *ast.InsertStatement) (any, error) {
-	logger.Debug("Executing INSERT statement on table: %s", stmt.TableName)
+func (e *Evaluator) evaluateInsert(stmt *ast.InsertStatement) (*ops.Operation, error) {
+	logger.Debug("Evaluating INSERT statement on table: %s", stmt.TableName)
+	operation, err := e.insertData(stmt.TableName, stmt.Columns, stmt.ValueLists)
+	if operation != nil {
+		operation.Type = common.Insert
+	}
+	return operation, err
+}
 
-	data, err := e.insertData(stmt.TableName, stmt.Columns, stmt.ValueLists)
+func (e *Evaluator) evaluateCreateTable(stmt *ast.CreateTableStatement) (*ops.Operation, error) {
+	logger.Debug("Evaluating CREATE TABLE statement for table: %s", stmt.TableName)
+
+	operation, err := e.createTable(stmt)
 	if err != nil {
-		logger.Error("Failed to execute INSERT statement: %v", err)
+		logger.Error("Failed to evaluate CREATE TABLE statement: %v", err)
 		return nil, err
 	}
-
-	logger.Debug("INSERT statement executed successfully")
-	return data, nil
+	if operation != nil {
+		operation.Type = common.CreateTable
+	}
+	return operation, nil
 }
 
-func (e *Evaluator) executeCreateTable(stmt *ast.CreateTableStatement) (any, error) {
-	logger.Debug("Executing CREATE TABLE statement for table: %s", stmt.TableName)
+func (e *Evaluator) evaluateDelete(stmt *ast.DeleteStatement) (*ops.Operation, error) {
+	logger.Debug("Evaluating DELETE statement on table: %s", stmt.TableName)
 
-	data, err := e.createTable(stmt)
+	operation, err := e.deleteData(stmt.TableName, stmt.Where)
 	if err != nil {
-		logger.Error("Failed to execute CREATE TABLE statement: %v", err)
+		logger.Error("Failed to evaluate DELETE statement: %v", err)
 		return nil, err
 	}
-
-	logger.Debug("CREATE TABLE statement executed successfully")
-	return data, nil
+	if operation != nil {
+		operation.Type = common.Delete
+	}
+	return operation, nil
 }
 
-func (e *Evaluator) executeDelete(stmt *ast.DeleteStatement) (any, error) {
-	logger.Debug("Executing DELETE statement on table: %s", stmt.TableName)
+func (e *Evaluator) evaluateDropTable(stmt *ast.DropTableStatement) (*ops.Operation, error) {
+	logger.Debug("Evaluating DROP TABLE statement for table: %s", stmt.TableName)
 
-	data, err := e.deleteData(stmt.TableName, stmt.Where)
+	operation, err := e.dropTable(stmt.TableName)
 	if err != nil {
-		logger.Error("Failed to execute DELETE statement: %v", err)
+		logger.Error("Failed to evaluate DROP TABLE statement: %v", err)
 		return nil, err
 	}
-
-	logger.Debug("DELETE statement executed successfully")
-	return data, nil
-}
-
-func (e *Evaluator) executeDropTable(stmt *ast.DropTableStatement) (any, error) {
-	logger.Debug("Executing DROP TABLE statement for table: %s", stmt.TableName)
-
-	data, err := e.dropTable(stmt.TableName)
-	if err != nil {
-		logger.Error("Failed to execute DROP TABLE statement: %v", err)
-		return nil, err
+	if operation != nil {
+		operation.Type = common.DropTable
 	}
-
-	logger.Debug("DROP TABLE statement executed successfully")
-	return data, nil
+	return operation, nil
 }
 
-func (e *Evaluator) executeDescribeTable(stmt *ast.DescribeTableStatement) (any, error) {
-	logger.Debug("Executing DESCRIBE TABLE statement for table: %s", stmt.TableName)
-
-	data, err := e.describeTable(stmt.TableName)
-	if err != nil {
-		logger.Error("Failed to execute DESCRIBE TABLE statement: %v", err)
-		return nil, err
-	}
-
-	logger.Debug("DESCRIBE TABLE statement executed successfully")
-	return data, nil
+func (e *Evaluator) evaluateDescribeTable(stmt *ast.DescribeTableStatement) (*ops.Operation, error) {
+	logger.Debug("Evaluating DESCRIBE TABLE statement for table: %s", stmt.TableName)
+	operation := &ops.Operation{TableName: stmt.TableName, ExecuteMethod: e.operations.ReadMetadata, Type: common.Read}
+	return operation, nil
 }
 
-func (e *Evaluator) executeCreateProcedure(stmt *ast.CreateProcedureStatement) (any, error) {
+// TODO: sproc this needs to be done via by the db
+func (e *Evaluator) executeCreateProcedure(stmt *ast.CreateProcedureStatement) (*ops.Operation, error) {
 	logger.Debug("Executing CREATE PROCEDURE statement for procedure: %s", stmt.Name)
 
-	proc := storedproc.NewStoredProc(
+	procedure := storedprocedure.NewStoredProcedure(
 		stmt.Name,
 		stmt.Body,
 		stmt.Parameters,
 		stmt.Description,
 	)
 
-	err := proc.WriteToFile(stmt.Name)
-	if err != nil {
-		logger.Error("Failed to create stored procedure: %v", err)
-		return nil, fmt.Errorf("failed to create stored procedure: %w", err)
+	operation := &ops.Operation{
+		StoredProcedureOperation: &ops.StoredProcedureOperation{
+			StoredProcedure:              procedure,
+			StoredProcedureOperationType: ops.CreateStoredProcedure,
+		},
+		Type: common.CreateProcedure,
 	}
 
 	logger.Debug("CREATE PROCEDURE statement executed successfully")
-	return "Stored procedure created successfully", nil
+	return operation, nil
 }
 
-func (e *Evaluator) executeAlterProcedure(stmt *ast.AlterProcedureStatement) (any, error) {
+func (e *Evaluator) executeAlterProcedure(stmt *ast.AlterProcedureStatement) (*ops.Operation, error) {
 	logger.Debug("Executing ALTER PROCEDURE statement for procedure: %s", stmt.Name)
 
-	proc := storedproc.NewStoredProc(
+	procedure := storedprocedure.NewStoredProcedure(
 		stmt.Name,
 		stmt.Body,
 		stmt.Parameters,
 		stmt.Description,
 	)
 
-	err := proc.WriteToFile(stmt.Name)
-	if err != nil {
-		logger.Error("Failed to alter stored procedure: %v", err)
-		return nil, fmt.Errorf("failed to alter stored procedure: %w", err)
+	operation := &ops.Operation{
+		StoredProcedureOperation: &ops.StoredProcedureOperation{
+			StoredProcedure:              procedure,
+			StoredProcedureOperationType: ops.AlterStoredProcedure,
+		},
+		Type: common.AlterProcedure,
 	}
 
 	logger.Debug("ALTER PROCEDURE statement executed successfully")
-	return "Stored procedure altered successfully", nil
+	return operation, nil
 }
 
-func (e *Evaluator) executeStoredProcedure(stmt *ast.ExecStatement) (any, error) {
-	proc := &storedproc.StoredProc{}
-	err := proc.ReadFromFile(stmt.Name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read stored procedure: %w", err)
+func (e *Evaluator) executeStoredProcedure(stmt *ast.ExecStatement) (*ops.Operation, error) {
+	procedure := &storedprocedure.StoredProcedure{
+		Name: stmt.Name,
 	}
 
-	if len(stmt.Parameters) != len(proc.Parameters) {
-		return nil, fmt.Errorf("parameter count mismatch: expected %d, got %d",
-			len(proc.Parameters), len(stmt.Parameters))
+	operation := &ops.Operation{
+		StoredProcedureOperation: &ops.StoredProcedureOperation{
+			StoredProcedure:              procedure,
+			StoredProcedureOperationType: ops.ExecuteStoredProcedure,
+		},
+		Type: common.ExecuteProcedure,
 	}
-
-	paramValues := make(map[string]any)
-	for i, param := range proc.Parameters {
-		paramValues[param.Name] = stmt.Parameters[i].GetValue()
-	}
-
-	processedBody := proc.Body
-	for name, value := range paramValues {
-		var valueStr string
-		switch v := value.(type) {
-		case string:
-			valueStr = "'" + v + "'"
-		default:
-			valueStr = fmt.Sprintf("%v", v)
-		}
-
-		processedBody = strings.Replace(processedBody, name, valueStr, -1)
-	}
-
-	// Split the body into individual statements
-	statements := strings.Split(processedBody, ";")
-	var lastResult any
-	var lastErr error
-
-	// Execute each statement
-	for _, statement := range statements {
-		statement = strings.TrimSpace(statement)
-		if statement == "" {
-			continue
-		}
-
-		e.parser.Lexer.SetInput(statement)
-		e.parser.NextToken()
-		e.parser.NextToken()
-
-		stmt, err := e.parser.ParseStatement()
-		if err != nil || stmt == nil {
-			return nil, fmt.Errorf("failed to parse statement in stored procedure: %s", statement)
-		}
-
-		lastResult, lastErr = e.executeStatement(stmt)
-		if lastErr != nil {
-			return nil, fmt.Errorf("failed to execute statement in stored procedure: %w", lastErr)
-		}
-	}
-
-	return lastResult, nil
+	return operation, nil
 }
 
-func (e *Evaluator) createTable(stmt *ast.CreateTableStatement) (any, error) {
+func (e *Evaluator) createTable(stmt *ast.CreateTableStatement) (*ops.Operation, error) {
 	metadata := database.TableMetadata{
 		Name:        stmt.TableName,
 		Columns:     stmt.Columns,
 		ForeignKeys: stmt.ForeignKeys,
 	}
 
-	operation := ops.Operation{
-		Metadata: metadata,
+	operation := &ops.Operation{
+		Metadata:      metadata,
+		ExecuteMethod: e.operations.CreateTable,
+		Type:          common.CreateTable,
 	}
 
-	result := e.operations.CreateTable(&operation)
-	if result.Err != nil {
-		return nil, fmt.Errorf("failed to create table: %w", result.Err)
-	}
-
-	return "Create table successful", nil
+	logger.Debug("Built CREATE TABLE operation for table: %s", stmt.TableName)
+	return operation, nil
 }
 
-func (e *Evaluator) executeCreateIndex(stmt *ast.CreateIndexStatement) (any, error) {
-	logger.Debug("Executing CREATE INDEX statement for index: %s on table: %s", stmt.IndexName, stmt.TableName)
+func (e *Evaluator) evaluateCreateIndex(stmt *ast.CreateIndexStatement) (*ops.Operation, error) {
+	logger.Debug("Built CREATE INDEX operation for index: %s on table: %s", stmt.IndexName, stmt.TableName)
 
 	operation := &ops.Operation{
-		TableName:   stmt.TableName,
-		IndexName:   stmt.IndexName,
-		ColumnNames: stmt.Columns,
-		IsUnique:    stmt.IsUnique,
+		TableName:     stmt.TableName,
+		IndexName:     stmt.IndexName,
+		ColumnNames:   stmt.Columns,
+		IsUnique:      stmt.IsUnique,
+		ExecuteMethod: e.operations.CreateIndex,
+		Type:          common.CreateIndex,
 	}
 
-	err := e.operations.CreateIndex(operation)
-
-	if err != nil {
-		logger.Error("Failed to execute CREATE INDEX statement: %v", err)
-		return nil, fmt.Errorf("failed to create index: %w", err)
-	}
-
-	logger.Debug("CREATE INDEX statement executed successfully")
-	return "Create index successful", nil
+	return operation, nil
 }
 
-func (e *Evaluator) executeDropIndex(stmt *ast.DropIndexStatement) (any, error) {
-	logger.Debug("Executing DROP INDEX statement for index: %s on table: %s", stmt.IndexName, stmt.TableName)
+func (e *Evaluator) evaluateDropIndex(stmt *ast.DropIndexStatement) (*ops.Operation, error) {
+	logger.Debug("Built DROP INDEX operation for index: %s on table: %s", stmt.IndexName, stmt.TableName)
 
 	operation := &ops.Operation{
-		TableName: stmt.TableName,
-		IndexName: stmt.IndexName,
+		TableName:     stmt.TableName,
+		IndexName:     stmt.IndexName,
+		ExecuteMethod: e.operations.DropIndex,
+		Type:          common.DropIndex,
 	}
 
-	result := e.operations.DropIndex(operation)
-	if result.Err != nil {
-		logger.Error("Failed to execute DROP INDEX statement: %v", result.Err)
-		return nil, fmt.Errorf("failed to drop index: %w", result.Err)
-	}
-
-	logger.Debug("DROP INDEX statement executed successfully")
-	return "Drop index successful", nil
+	return operation, nil
 }
 
-func (e *Evaluator) executeShowIndexes(stmt *ast.ShowIndexesStatement) (any, error) {
-	logger.Debug("Executing SHOW INDEXES statement for table: %s", stmt.TableName)
+func (e *Evaluator) evaluateShowIndexes(stmt *ast.ShowIndexesStatement) (*ops.Operation, error) {
+	logger.Debug("Built SHOW INDEXES operation for table: %s", stmt.TableName)
 
 	operation := &ops.Operation{
-		TableName: stmt.TableName,
+		TableName:     stmt.TableName,
+		ExecuteMethod: e.operations.ListIndexes,
+		Type:          common.Read,
 	}
 
-	result := e.operations.ListIndexes(operation)
-	if result.Err != nil {
-		logger.Error("Failed to execute SHOW INDEXES statement: %v", result.Err)
-		return nil, fmt.Errorf("failed to list indexes: %w", result.Err)
-	}
-
-	logger.Debug("SHOW INDEXES statement executed successfully")
-	return result.IndexMetaData, nil
+	return operation, nil
 }
 
-func (e *Evaluator) executeAlterTable(stmt *ast.AlterTableStatement) (any, error) {
-	logger.Debug("Executing ALTER TABLE statement for table: %s", stmt.TableName)
+func (e *Evaluator) evaluateAlterTable(stmt *ast.AlterTableStatement) (*[]ops.Operation, error) {
+	logger.Debug("Built ALTER TABLE operations for table: %s", stmt.TableName)
+
+	var opsList []ops.Operation
 
 	if stmt.DropConstraint {
-		operation := &ops.Operation{
+		operation := ops.Operation{
 			TableName:      stmt.TableName,
 			ConstraintName: stmt.ConstraintName,
+			ExecuteMethod:  e.operations.DropConstraint,
+			Type:           common.Alter,
 		}
-
-		logger.Debug("Dropping constraint: %s from table: %s", stmt.ConstraintName, stmt.TableName)
-		result := e.operations.DropConstraint(operation)
-
-		if result.Err != nil {
-			logger.Error("Failed to execute DROP CONSTRAINT statement: %v", result.Err)
-			return nil, fmt.Errorf("failed to drop constraint: %w", result.Err)
-		}
+		logger.Debug("Built DROP CONSTRAINT operation: %s on table: %s", stmt.ConstraintName, stmt.TableName)
+		opsList = append(opsList, operation)
 	}
 
 	if stmt.AddColumn {
-		operation := &ops.Operation{
-			TableName: stmt.TableName,
-			Columns:   stmt.Columns,
+		operation := ops.Operation{
+			TableName:     stmt.TableName,
+			Columns:       stmt.Columns,
+			ExecuteMethod: e.operations.AddColumnsToTable,
+			Type:          common.Alter,
 		}
-
-		result := e.operations.AddColumnsToTable(operation)
-		if result.Err != nil {
-			logger.Error("Failed to execute ADD CONSTRAINT statement: %v", result.Err)
-			return nil, fmt.Errorf("failed to add constraint: %w", result.Err)
-		}
+		logger.Debug("Built ADD COLUMNS operation on table: %s", stmt.TableName)
+		opsList = append(opsList, operation)
 	}
 
-	return nil, nil
+	if len(opsList) == 0 {
+		return nil, nil
+	}
+
+	return &opsList, nil
 }
 
-func (e *Evaluator) executeTransaction(stmt *ast.TransactionStatement) (any, error) {
-	tx := e.TransactionManager.Begin()
+func (e *Evaluator) evaluateTransaction(stmt *ast.TransactionStatement) (*[]ops.Operation, error) {
+	var opsList []ops.Operation
 
 	for _, s := range stmt.Statements {
-		var change transaction.Change
 		if _, ok := s.(*ast.BeginStatement); ok {
 			continue
 		}
 
 		if _, ok := s.(*ast.CommitStatement); ok {
-			change = transaction.Change{Commit: true}
+			// Handle commit if needed
+			continue
 		}
 
 		if _, ok := s.(*ast.RollbackStatement); ok {
-			change = transaction.Change{Rollback: true}
+			// Handle rollback if needed
+			continue
 		}
 
-		if !change.Commit && !change.Rollback {
-			op := buildOperationFromStatement(s)
-			change = transaction.Change{Operation: op, Statement: s}
+		operations, err := e.evaluateStatement(s)
+		if err != nil {
+			return nil, err
 		}
-
-		e.TransactionManager.AddChange(tx, change)
+		if operations != nil {
+			for i := range *operations {
+				(*operations)[i].Type = common.Transaction
+				opsList = append(opsList, (*operations)[i])
+			}
+		}
 	}
 
-	results, err := e.TransactionManager.Execute(tx, e.executeStatement)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return results, nil
+	return &opsList, nil
 }

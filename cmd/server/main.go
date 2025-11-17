@@ -1,6 +1,8 @@
-package server
+package main
 
-import "LiminalDb/internal/server"
+import (
+	"LiminalDb/internal/database/server"
+)
 
 func main() {
 	server.StartServer()

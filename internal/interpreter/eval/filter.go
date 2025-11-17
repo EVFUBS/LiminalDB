@@ -11,7 +11,7 @@ func (e *Evaluator) filter(where ast.Expression) func(row []any, columns []datab
 			return true, nil
 		}
 
-		matches, err := e.Evaluate(where, row, columns)
+		matches, err := e.EvaluateValue(where, row, columns)
 		if err != nil {
 			return false, err
 		}

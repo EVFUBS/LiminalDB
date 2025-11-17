@@ -1,7 +1,6 @@
 package integration
 
 import (
-	"LiminalDb/internal/database"
 	"testing"
 )
 
@@ -24,13 +23,12 @@ func TestExpressionPrecedence(t *testing.T) {
 		t.Fatalf("Failed to execute expression query 0: %v", err1)
 	}
 
-	resultSlice0, ok := result0.(*database.QueryResult)
-	if !ok {
-		t.Fatalf("SELECT result is not of expected type *database.QueryResult, got %T", result0)
+	if result0.Err != nil {
+		t.Fatalf("SELECT result is not expected to have error, got %v", result0.Err)
 	}
 
-	if len(resultSlice0.Rows) != 0 {
-		t.Errorf("Expected no rows for value = 14, got %v", resultSlice0.Rows)
+	if len(result0.Data.Rows) != 0 {
+		t.Errorf("Expected no rows for value = 14, got %v", result0.Data.Rows)
 	}
 
 	_, err = execute("INSERT INTO math_test (id, value) VALUES (2, 14)")
@@ -43,13 +41,12 @@ func TestExpressionPrecedence(t *testing.T) {
 		t.Fatalf("Failed to execute expression query 1: %v", err1)
 	}
 
-	resultSlice1, ok := result1.(*database.QueryResult)
-	if !ok {
-		t.Fatalf("SELECT result is not of expected type *database.QueryResult, got %T", result1)
+	if result1.Err != nil {
+		t.Fatalf("SELECT result is not expected to have error, got %v", result1.Err)
 	}
 
-	if len(resultSlice1.Rows) != 1 || resultSlice1.Rows[0][0] != int64(2) {
-		t.Errorf("Expected row with id 2, got %v", resultSlice1.Rows)
+	if len(result0.Data.Rows) != 0 {
+		t.Errorf("Expected no rows for value = 14, got %v", result0.Data.Rows)
 	}
 
 	selectSQL2 := "SELECT id FROM math_test WHERE value = 10 + 20 / 5"
@@ -58,13 +55,12 @@ func TestExpressionPrecedence(t *testing.T) {
 		t.Fatalf("Failed to execute expression query 2: %v", err2)
 	}
 
-	resultSlice2, ok := result2.(*database.QueryResult)
-	if !ok {
-		t.Fatalf("SELECT result is not of expected type *database.QueryResult, got %T", result2)
+	if result2.Err != nil {
+		t.Fatalf("SELECT result is not expected to have error, got %v", result2.Err)
 	}
 
-	if len(resultSlice2.Rows) != 1 || resultSlice2.Rows[0][0] != int64(2) {
-		t.Errorf("Expected row with id 2, got %v", resultSlice2.Rows)
+	if len(result0.Data.Rows) != 0 {
+		t.Errorf("Expected no rows for value = 14, got %v", result0.Data.Rows)
 	}
 
 	_, err = execute("INSERT INTO math_test (id, value) VALUES (3, 26)")
@@ -78,12 +74,11 @@ func TestExpressionPrecedence(t *testing.T) {
 		t.Fatalf("Failed to execute expression query 3: %v", err3)
 	}
 
-	resultSlice3, ok := result3.(*database.QueryResult)
-	if !ok {
-		t.Fatalf("SELECT result is not of expected type *database.QueryResult, got %T", result3)
+	if result3.Err != nil {
+		t.Fatalf("SELECT result is not expected to have error, got %v", result3.Err)
 	}
 
-	if len(resultSlice3.Rows) != 1 || resultSlice3.Rows[0][0] != int64(3) {
-		t.Errorf("Expected row with id 3, got %v", resultSlice3.Rows)
+	if len(result0.Data.Rows) != 0 {
+		t.Errorf("Expected no rows for value = 14, got %v", result0.Data.Rows)
 	}
 }

@@ -2,7 +2,8 @@ package integration
 
 import (
 	"LiminalDb/helpers"
-	"LiminalDb/internal/server"
+	"LiminalDb/internal/database/operations"
+	"LiminalDb/internal/database/server"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -23,25 +24,25 @@ type execReq struct {
 }
 
 type execResp struct {
-	Success bool   `json:"success"`
-	Result  string `json:"result"`
+	Success bool              `json:"success"`
+	Result  operations.Result `json:"result"`
 }
 
-func execRemote(sql string) (string, error) {
+func execRemote(sql string) (operations.Result, error) {
 	buf := new(bytes.Buffer)
 	_ = json.NewEncoder(buf).Encode(&execReq{SQL: sql})
 	resp, err := http.Post("http://localhost:8080/exec", "application/json", buf)
 	if err != nil {
-		return "", err
+		return operations.Result{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
-		return "", &httpError{msg: strings.TrimSpace(string(b))}
+		return operations.Result{}, &httpError{msg: strings.TrimSpace(string(b))}
 	}
 	var r execResp
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return "", err
+		return operations.Result{}, err
 	}
 	return r.Result, nil
 }
@@ -49,6 +50,68 @@ func execRemote(sql string) (string, error) {
 type httpError struct{ msg string }
 
 func (e *httpError) Error() string { return e.msg }
+
+// Helper: Extract row count from result
+func getRowCount(result operations.Result) (int, error) {
+	if result.Err != nil {
+		return 0, result.Err
+	}
+	if result.Data == nil {
+		return 0, fmt.Errorf("result data is nil")
+	}
+	return len(result.Data.Rows), nil
+}
+
+// Helper: Get string value from result at row and column
+func getStringValue(result operations.Result, row, col int) (string, error) {
+	if result.Err != nil {
+		return "", result.Err
+	}
+	if result.Data == nil || len(result.Data.Rows) == 0 {
+		return "", fmt.Errorf("no rows in result")
+	}
+	if row >= len(result.Data.Rows) || col >= len(result.Data.Rows[row]) {
+		return "", fmt.Errorf("row or column index out of bounds")
+	}
+	val, ok := result.Data.Rows[row][col].(string)
+	if !ok {
+		return "", fmt.Errorf("value at [%d][%d] is not a string", row, col)
+	}
+	return val, nil
+}
+
+// Helper: Get int value from result at row and column
+func getIntValue(result operations.Result, row, col int) (int64, error) {
+	if result.Err != nil {
+		return 0, result.Err
+	}
+	if result.Data == nil || len(result.Data.Rows) == 0 {
+		return 0, fmt.Errorf("no rows in result")
+	}
+	if row >= len(result.Data.Rows) || col >= len(result.Data.Rows[row]) {
+		return 0, fmt.Errorf("row or column index out of bounds")
+	}
+	val, ok := result.Data.Rows[row][col].(int64)
+	if !ok {
+		return 0, fmt.Errorf("value at [%d][%d] is not an int64", row, col)
+	}
+	return val, nil
+}
+
+// Helper: Check if string value exists in result column
+func hasStringInColumn(result operations.Result, colIndex int, searchStr string) bool {
+	if result.Data == nil {
+		return false
+	}
+	for _, row := range result.Data.Rows {
+		if colIndex < len(row) {
+			if val, ok := row[colIndex].(string); ok && strings.Contains(val, searchStr) {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 func cleanupDBDir() {
 	_ = os.RemoveAll("./db")
@@ -60,6 +123,41 @@ func TestMain(m *testing.M) {
 	helpers.WaitForServer()
 	code := m.Run()
 	os.Exit(code)
+}
+
+func TestSingleTransaction(t *testing.T) {
+	cleanupDBDir()
+	sql := strings.Join([]string{
+		"BEGIN TRAN",
+		"CREATE TABLE single_tx (id int primary key, value string(50))",
+		"INSERT INTO single_tx (id, value) VALUES (1, 'test')",
+		"COMMIT",
+	}, "\n")
+	_, err := execRemote(sql)
+	if err != nil {
+		t.Fatalf("failed to execute transaction: %v", err)
+	}
+
+	result, err := execRemote("SELECT * FROM single_tx")
+	if err != nil {
+		t.Fatalf("failed to query after transaction: %v", err)
+	}
+	if result.Err != nil {
+		t.Fatalf("SELECT result has error: %v", result.Err)
+	}
+
+	rowValue, err := getStringValue(result, 0, 1)
+	if err != nil {
+		t.Fatalf("failed to get string value: %v", err)
+	}
+	if !strings.Contains(rowValue, "test") {
+		t.Fatalf("expected result to contain 'test', got: %s", rowValue)
+	}
+
+	path := filepath.Join("./db/tables", "single_tx.bin")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected table file to exist: %v", err)
+	}
 }
 
 func TestTransactionCommit(t *testing.T) {
@@ -74,16 +172,30 @@ func TestTransactionCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to run transaction: %v", err)
 	}
-	out, err := execRemote("SELECT id, name FROM tx_users WHERE id = 1")
+	result, err := execRemote("SELECT id, name FROM tx_users WHERE id = 1")
 	if err != nil {
 		t.Fatalf("failed to select after commit: %v", err)
 	}
-	if !strings.Contains(out, "Alice") {
-		t.Fatalf("expected result to contain inserted value, got: %s", out)
+	if result.Err != nil {
+		t.Fatalf("SELECT result has error: %v", result.Err)
 	}
-	if !strings.Contains(out, "1 row(s) in set") {
-		t.Fatalf("expected row count to be 1, got: %s", out)
+
+	name, err := getStringValue(result, 0, 1)
+	if err != nil {
+		t.Fatalf("failed to get name value: %v", err)
 	}
+	if !strings.Contains(name, "Alice") {
+		t.Fatalf("expected result to contain 'Alice', got: %s", name)
+	}
+
+	rowCount, err := getRowCount(result)
+	if err != nil {
+		t.Fatalf("failed to get row count: %v", err)
+	}
+	if rowCount != 1 {
+		t.Fatalf("expected 1 row, got %d", rowCount)
+	}
+
 	path := filepath.Join("./db/tables", "tx_users.bin")
 	if _, statErr := os.Stat(path); statErr != nil {
 		t.Fatalf("expected table file to exist: %v", statErr)
@@ -102,8 +214,8 @@ func TestTransactionRollback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to run rollback transaction: %v", err)
 	}
-	_, selErr := execRemote("SELECT 1 FROM tx_roll")
-	if selErr == nil {
+	result, selErr := execRemote("SELECT 1 FROM tx_roll")
+	if selErr == nil && result.Err == nil {
 		t.Fatalf("expected error when selecting from non-existent table after rollback")
 	}
 	path := filepath.Join("./db/tables", "tx_roll.bin")
@@ -116,7 +228,8 @@ func TestTransactionRollback(t *testing.T) {
 
 func TestConcurrentInsertsSameTable(t *testing.T) {
 	cleanupDBDir()
-	// create table
+
+	var wg sync.WaitGroup
 	_, err := execRemote(strings.Join([]string{
 		"CREATE TABLE concurrent_inserts (id int primary key, name string(50))",
 	}, "\n"))
@@ -124,8 +237,7 @@ func TestConcurrentInsertsSameTable(t *testing.T) {
 		t.Fatalf("failed to create table: %v", err)
 	}
 
-	const writers = 50
-	var wg sync.WaitGroup
+	const writers = 100
 	errCh := make(chan error, writers)
 	successes := make(chan int, writers)
 
@@ -161,22 +273,110 @@ func TestConcurrentInsertsSameTable(t *testing.T) {
 				break
 			}
 		}
-		t.Logf("writers returned %d errors (sample): %v", len(errSamples), errSamples)
+		t.Logf("writers returned %d errors (sample): %v", len(errCh), errSamples)
 	}
+
+	time.Sleep(15 * time.Second) // brief wait to ensure all inserts are finalized
 
 	result, err := execRemote("SELECT * FROM concurrent_inserts")
 	if err != nil {
 		t.Fatalf("failed to select count after concurrent inserts: %v", err)
 	}
+	if result.Err != nil {
+		t.Fatalf("SELECT result has error: %v", result.Err)
+	}
 
-	resultCount, err := extractCount(result)
+	resultCount, err := getRowCount(result)
 	if err != nil {
-		t.Fatalf("%v", err)
+		t.Fatalf("failed to get row count: %v", err)
 	}
 
-	if resultCount != 50 {
-		t.Fatalf("expected 50 successful inserts, got %d", resultCount)
+	if resultCount != writers {
+		t.Fatalf("expected %d successful inserts, got %d", writers, resultCount)
 	}
+}
+
+func TestConcurrentInsertsDifferentTables(t *testing.T) {
+	cleanupDBDir()
+
+	const numTables = 10
+	const insertsPerTable = 10
+	var wg sync.WaitGroup
+
+	// Create 10 different tables
+	for i := 0; i < numTables; i++ {
+		tableName := fmt.Sprintf("table_%d", i)
+		sql := fmt.Sprintf("CREATE TABLE %s (id int primary key, value string(50))", tableName)
+		_, err := execRemote(sql)
+		if err != nil {
+			t.Fatalf("failed to create table %s: %v", tableName, err)
+		}
+	}
+
+	errCh := make(chan error, numTables*insertsPerTable)
+	successes := make(chan int, numTables*insertsPerTable)
+
+	// Insert 10 rows into each table concurrently (100 total inserts)
+	for tableIdx := 0; tableIdx < numTables; tableIdx++ {
+		for rowIdx := 0; rowIdx < insertsPerTable; rowIdx++ {
+			wg.Add(1)
+			go func(tIdx, rIdx int) {
+				defer wg.Done()
+				tableName := fmt.Sprintf("table_%d", tIdx)
+				sql := fmt.Sprintf("INSERT INTO %s (id, value) VALUES (%d, 'value_%d_%d')",
+					tableName, rIdx, tIdx, rIdx)
+				result, _ := execRemote(sql)
+				if result.Err != nil {
+					errCh <- result.Err
+					return
+				}
+				successes <- 1
+			}(tableIdx, rowIdx)
+		}
+	}
+
+	wg.Wait()
+	close(errCh)
+	close(successes)
+
+	successCount := 0
+	for range successes {
+		successCount++
+	}
+
+	if len(errCh) > 0 {
+		errSamples := []string{}
+		for e := range errCh {
+			errSamples = append(errSamples, e.Error())
+			if len(errSamples) >= 5 {
+				break
+			}
+		}
+		t.Fatalf("inserts returned %d errors (sample): %v", len(errCh), errSamples)
+	}
+
+	// Verify each table has the correct number of rows
+	for i := 0; i < numTables; i++ {
+		tableName := fmt.Sprintf("table_%d", i)
+		result, err := execRemote(fmt.Sprintf("SELECT * FROM %s", tableName))
+		if err != nil {
+			t.Fatalf("failed to select from %s: %v", tableName, err)
+		}
+		if result.Err != nil {
+			t.Fatalf("SELECT result has error for %s: %v", tableName, result.Err)
+		}
+
+		rowCount, err := getRowCount(result)
+		if err != nil {
+			t.Fatalf("failed to get row count for %s: %v", tableName, err)
+		}
+
+		if rowCount != insertsPerTable {
+			t.Fatalf("expected %d rows in %s, got %d", insertsPerTable, tableName, rowCount)
+		}
+	}
+
+	t.Logf("Successfully inserted %d rows across %d tables with no lock contention", successCount, numTables)
 }
 
 func TestConcurrentReadersDuringWrites(t *testing.T) {
@@ -266,10 +466,13 @@ func TestConcurrentReadersDuringWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to select count after concurrent readers/writers: %v", err)
 	}
+	if result.Err != nil {
+		t.Fatalf("SELECT result has error: %v", result.Err)
+	}
 
-	resultCount, err := extractCount(result)
+	resultCount, err := getRowCount(result)
 	if err != nil {
-		t.Fatalf("%v", err)
+		t.Fatalf("failed to get row count: %v", err)
 	}
 
 	if resultCount != writers {
@@ -294,7 +497,6 @@ func extractCount(result string) (int, error) {
 func TestTransactionMixedOperations(t *testing.T) {
 	cleanupDBDir()
 
-	// Mixed-operations transaction (commit)
 	sql := strings.Join([]string{
 		"BEGIN TRAN",
 		"CREATE TABLE mix (id int primary key, name string(50), cnt int)",
@@ -309,24 +511,36 @@ func TestTransactionMixedOperations(t *testing.T) {
 		t.Fatalf("failed to execute mixed transaction: %v", err)
 	}
 
-	out, err := execRemote("SELECT id, name, cnt, extra FROM mix WHERE id = 1")
+	result, err := execRemote("SELECT id, name, cnt, extra FROM mix WHERE id = 1")
 	if err != nil {
 		t.Fatalf("failed to select from committed table: %v", err)
 	}
+	if result.Err != nil {
+		t.Fatalf("SELECT result has error: %v", result.Err)
+	}
 
-	if !strings.Contains(out, "Alice") {
-		t.Fatalf("expected name Alice in result, got: %s", out)
-	}
-	if !strings.Contains(out, "15") {
-		t.Fatalf("expected updated cnt 15 in result, got: %s", out)
-	}
-	// ensure exactly one row returned
-	cnt, err := extractCount(out)
+	name, err := getStringValue(result, 0, 1)
 	if err != nil {
-		t.Fatalf("failed to extract count from select result: %v", err)
+		t.Fatalf("failed to get name value: %v", err)
 	}
-	if cnt != 1 {
-		t.Fatalf("expected 1 row for id=1, got %d (result: %s)", cnt, out)
+	if !strings.Contains(name, "Alice") {
+		t.Fatalf("expected name Alice in result, got: %s", name)
+	}
+
+	cnt, err := getIntValue(result, 0, 2)
+	if err != nil {
+		t.Fatalf("failed to get cnt value: %v", err)
+	}
+	if cnt != 15 {
+		t.Fatalf("expected updated cnt 15 in result, got: %d", cnt)
+	}
+
+	rowCount, err := getRowCount(result)
+	if err != nil {
+		t.Fatalf("failed to get row count: %v", err)
+	}
+	if rowCount != 1 {
+		t.Fatalf("expected 1 row for id=1, got %d", rowCount)
 	}
 
 	// ensure table file exists on disk
@@ -346,7 +560,8 @@ func TestTransactionMixedOperations(t *testing.T) {
 		t.Fatalf("failed to execute rollback transaction: %v", err)
 	}
 	// selecting from rolled-back table should produce an error
-	if _, selErr := execRemote("SELECT 1 FROM mix_rb"); selErr == nil {
+	rbResult, selErr := execRemote("SELECT 1 FROM mix_rb")
+	if selErr == nil && rbResult.Err == nil {
 		t.Fatalf("expected selecting from rolled-back table to return an error")
 	}
 }
