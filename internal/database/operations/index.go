@@ -127,7 +127,7 @@ func findUniqueIndex(candidates []candidateIndex) *candidateIndex {
 func (o *OperationsImpl) CreateIndex(op *Operation) *Result {
 	logger.Info("Creating index %s on table %s", op.IndexName, op.TableName)
 
-	table, err := o.Serializer.ReadTableFromFile(op.TableName)
+	table, err := o.Serializer.ReadTableFromPath(o.getWorkingTablePath(op, op.TableName))
 	if err != nil {
 		logger.Error("Failed to read table %s: %v", op.TableName, err)
 		return &Result{Err: err}
@@ -178,32 +178,30 @@ func (o *OperationsImpl) CreateIndex(op *Operation) *Result {
 		return &Result{Err: err}
 	}
 
-	err = o.SaveIndexToFile(index, op.TableName, op.IndexName)
+	indexBytes, err := indexing.SerializeIndex(index)
 	if err != nil {
+		logger.Error("Failed to serialize index %s: %v", op.IndexName, err)
+		return &Result{Err: err}
+	}
+
+	if err := o.writeIndexWithShadow(op, indexBytes, op.TableName, op.IndexName); err != nil {
+		logger.Error("Failed to write index file %s: %v", op.IndexName, err)
+		return &Result{Err: err}
+	}
+
+	err = o.writeTableWithShadow(op, table, op.TableName)
+	if err != nil {
+		logger.Error("Failed to write table metadata %s: %v", op.TableName, err)
 		return &Result{Err: err}
 	}
 
 	return &Result{}
 }
 
-func (o *OperationsImpl) SaveIndexToFile(index *indexing.Index, tableName string, indexName string) error {
-	indexBytes, err := indexing.SerializeIndex(index)
-	if err != nil {
-		return err
-	}
-
-	indexFilePath := getIndexFilePath(tableName, indexName)
-	if err := os.WriteFile(indexFilePath, indexBytes, 0666); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func (o *OperationsImpl) DropIndex(op *Operation) *Result {
 	logger.Info("Dropping index %s from table %s", op.IndexName, op.TableName)
 
-	table, err := o.Serializer.ReadTableFromFile(op.TableName)
+	table, err := o.Serializer.ReadTableFromPath(o.getWorkingTablePath(op, op.TableName))
 	if err != nil {
 		logger.Error("Failed to read table %s: %v", op.TableName, err)
 		return &Result{Err: err}
@@ -226,12 +224,13 @@ func (o *OperationsImpl) DropIndex(op *Operation) *Result {
 		return &Result{Err: fmt.Errorf("index %s not found on table %s", op.IndexName, op.TableName)}
 	}
 
-	indexFilePath := getIndexFilePath(op.TableName, op.IndexName)
-	if err := os.Remove(indexFilePath); err != nil && !os.IsNotExist(err) {
-		return &Result{Err: err}
+	// Delete the index file from the working path (shadow or real)
+	workingIndexPath := o.getWorkingIndexPath(op, op.TableName, op.IndexName)
+	if err := os.Remove(workingIndexPath); err != nil && !os.IsNotExist(err) {
+		return &Result{Err: fmt.Errorf("failed to delete index file: %w", err)}
 	}
 
-	err = o.Serializer.WriteTableToFile(table, op.TableName)
+	err = o.writeTableWithShadow(op, table, op.TableName)
 	if err != nil {
 		return &Result{Err: err}
 	}
@@ -242,7 +241,7 @@ func (o *OperationsImpl) DropIndex(op *Operation) *Result {
 func (o *OperationsImpl) ListIndexes(op *Operation) *Result {
 	logger.Debug("Listing indexes for table %s", op.TableName)
 
-	table, err := o.Serializer.ReadTableFromFile(op.TableName)
+	table, err := o.Serializer.ReadTableFromPath(o.getWorkingTablePath(op, op.TableName))
 	if err != nil {
 		logger.Error("Failed to read table %s: %v", op.TableName, err)
 		return &Result{Err: err}
@@ -251,11 +250,13 @@ func (o *OperationsImpl) ListIndexes(op *Operation) *Result {
 	return &Result{IndexMetaData: table.Metadata.Indexes}
 }
 
-func (o *OperationsImpl) loadIndex(tableName string, indexName string) (*indexing.Index, error) {
-	indexFilePath := getIndexFilePath(tableName, indexName)
+func (o *OperationsImpl) loadIndex(op *Operation, tableName string, indexName string) (*indexing.Index, error) {
+	workingIndexPath := o.getWorkingIndexPath(op, tableName, indexName)
 
-	if _, err := os.Stat(indexFilePath); os.IsNotExist(err) {
-		table, err := o.Serializer.ReadTableFromFile(tableName)
+	// Check if index file exists at the working path (shadow or real)
+	if _, err := os.Stat(workingIndexPath); os.IsNotExist(err) {
+		// Index file doesn't exist, rebuild from table data
+		table, err := o.Serializer.ReadTableFromPath(o.getWorkingTablePath(op, tableName))
 		if err != nil {
 			return nil, err
 		}
@@ -282,9 +283,10 @@ func (o *OperationsImpl) loadIndex(tableName string, indexName string) (*indexin
 		return index, nil
 	}
 
-	indexBytes, err := os.ReadFile(indexFilePath)
+	// Load index from the working path
+	indexBytes, err := os.ReadFile(workingIndexPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read index file: %w", err)
 	}
 
 	index, err := indexing.DeserializeIndex(indexBytes)

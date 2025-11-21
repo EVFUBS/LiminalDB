@@ -158,8 +158,12 @@ func FormatResult(result operations.Result) string {
 
 	resultString, err := formatQueryResult(result.Data)
 
+	if err != nil && result.Message != "" {
+		return result.Message
+	}
+
 	if err != nil {
-		return fmt.Sprintf("Error: %v", result)
+		return err.Error()
 	}
 
 	return resultString

@@ -5,7 +5,7 @@ import (
 )
 
 func (o *OperationsImpl) AddColumnsToTable(op *Operation) *Result {
-	table, err := o.Serializer.ReadTableFromFile(op.TableName)
+	table, err := o.Serializer.ReadTableFromPath(o.getWorkingTablePath(op, op.TableName))
 	if err != nil {
 		return &Result{Err: err}
 	}
@@ -34,9 +34,9 @@ func (o *OperationsImpl) AddColumnsToTable(op *Operation) *Result {
 		}
 	}
 
-	if err := o.Serializer.WriteTableToFile(table, op.TableName); err != nil {
+	if err := o.writeTableWithShadow(op, table, op.TableName); err != nil {
 		return &Result{Err: err}
 	}
 
-	return &Result{}
+	return &Result{Message: fmt.Sprintf("Successfully added %d columns to table %s", len(op.Columns), op.TableName)}
 }

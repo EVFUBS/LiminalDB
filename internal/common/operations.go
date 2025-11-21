@@ -17,4 +17,6 @@ const (
 	ExecuteProcedure
 	CreateIndex
 	DropIndex
+	Commit
+	Rollback
 )

@@ -1,6 +1,7 @@
 package transaction
 
 import (
+	"LiminalDb/internal/common"
 	ops "LiminalDb/internal/database/operations"
 	log "LiminalDb/internal/logger"
 	"fmt"
@@ -36,11 +37,12 @@ func (s Status) String() string {
 }
 
 type Transaction struct {
-	ID        string
-	Status    Status
-	Changes   []*Change
-	Timestamp int64
-	Locks     map[string]Lock
+	ID            string
+	Status        Status
+	Changes       []*Change
+	Timestamp     int64
+	Locks         map[string]Lock
+	ShadowManager *ShadowManager
 }
 
 type TransactionManager struct {
@@ -71,11 +73,12 @@ func (tm *TransactionManager) NewTransaction(operations *[]ops.Operation) *Trans
 	}
 
 	tx := &Transaction{
-		ID:        transactionId,
-		Status:    Active,
-		Changes:   changes,
-		Timestamp: time.Now().Unix(),
-		Locks:     allLocks,
+		ID:            transactionId,
+		Status:        Active,
+		Changes:       changes,
+		Timestamp:     time.Now().Unix(),
+		Locks:         allLocks,
+		ShadowManager: NewShadowManager(transactionId),
 	}
 
 	tm.mu.Lock()
@@ -98,11 +101,14 @@ func (tm *TransactionManager) Execute(tx *Transaction) []ops.Result {
 		return results
 	}
 
-	var rollback bool
-	var commit bool
+	// Step 1: Acquire ALL unique locks upfront (not per-change)
+	logger.Debug("Acquiring all locks for transaction %s", tx.ID)
+	acquiredLocks := make(map[string]bool)
 	for _, change := range tx.Changes {
-
-		for _, lock := range change.Locks {
+		for resourceID, lock := range change.Locks {
+			if acquiredLocks[resourceID] {
+				continue // Already acquired this lock
+			}
 			logger.Debug("Requesting lock on resource %s", lock.ResourceID)
 			if !tm.LockManager.RequestAndWait(lock.ResourceID, lock, 60*time.Second) {
 				logger.Debug("Failed to acquire lock on resource %s", lock.ResourceID)
@@ -110,14 +116,46 @@ func (tm *TransactionManager) Execute(tx *Transaction) []ops.Result {
 					Err: fmt.Errorf("transaction %s failed to acquire lock on resource %s within timeout",
 						tx.ID, lock.ResourceID),
 				})
-				tm.releaseLocksForChange(change)
+				// Release any locks we did acquire
+				tm.releaseLocksForTransaction(tx)
 				tx.Status = RolledBack
 				return results
 			}
+			acquiredLocks[resourceID] = true
 		}
+	}
+	logger.Debug("Acquired all locks for transaction %s", tx.ID)
 
-		logger.Debug("Acquired locks for %d resources", len(change.Locks))
+	// Step 2: Create shadow copies for all affected tables
+	logger.Debug("Creating shadow copies for transaction %s", tx.ID)
+	tablesProcessed := make(map[string]bool)
+	for _, change := range tx.Changes {
+		tableName := change.Operation.TableName
+		if tableName == "" {
+			tableName = change.Operation.Metadata.Name
+		}
+		if tableName != "" && !tablesProcessed[tableName] {
+			if err := tx.ShadowManager.CreateShadowForTable(tableName); err != nil {
+				logger.Error("Failed to create shadow for table %s: %v", tableName, err)
+				results = append(results, ops.Result{Err: fmt.Errorf("failed to create shadow for table %s: %w", tableName, err)})
+				tm.releaseLocksForTransaction(tx)
 
+				err := tx.ShadowManager.CleanupShadows()
+				if err != nil {
+					return nil
+				}
+
+				tx.Status = RolledBack
+				return results
+			}
+			tablesProcessed[tableName] = true
+		}
+	}
+
+	// Step 3: Execute all operations on shadow files
+	var rollback bool
+	var commit bool
+	for _, change := range tx.Changes {
 		if change.Rollback {
 			rollback = true
 			break
@@ -128,23 +166,44 @@ func (tm *TransactionManager) Execute(tx *Transaction) []ops.Result {
 			break
 		}
 
+		change.Operation.ShadowManager = tx.ShadowManager
+
+		logger.Debug("Executing operation on shadow files")
 		changeResult := change.Operation.Execute()
 
 		if changeResult.Err != nil {
+			logger.Error("Operation failed: %v", changeResult.Err)
 			results = append(results, ops.Result{Err: changeResult.Err})
-			tx.Status = RolledBack
-			return results
+			rollback = true
+			break
 		}
 
+		change.Ran = true
 		results = append(results, *changeResult)
-		tm.releaseLocksForChange(change)
 	}
 
+	// Step 4: Commit or rollback based on results
 	if rollback || !commit {
+		logger.Info("Rolling back transaction %s", tx.ID)
 		tx.Status = RolledBack
+		if err := tx.ShadowManager.CleanupShadows(); err != nil {
+			logger.Error("Failed to cleanup shadows during rollback: %v", err)
+		}
 	} else if commit {
-		tx.Status = Committed
+		logger.Info("Committing transaction %s", tx.ID)
+		if err := tx.ShadowManager.CommitShadows(); err != nil {
+			logger.Error("Failed to commit shadows: %v", err)
+			results = append(results, ops.Result{Err: fmt.Errorf("failed to commit transaction: %w", err)})
+			tx.Status = RolledBack
+			tx.ShadowManager.CleanupShadows()
+		} else {
+			tx.Status = Committed
+		}
 	}
+
+	// Step 5: Release all locks
+	tm.releaseLocksForTransaction(tx)
+	logger.Info("Transaction %s completed with status: %s", tx.ID, tx.Status)
 
 	return results
 }
@@ -158,22 +217,24 @@ func (tm *TransactionManager) releaseLocksForTransaction(tx *Transaction) {
 	}
 }
 
-// releaseLocksForTransaction releases all locks held by a change
-func (tm *TransactionManager) releaseLocksForChange(change *Change) {
-	for _, lock := range change.Locks {
-		tm.LockManager.ReleaseLock(lock.ResourceID, lock.TransactionID, lock.Type)
-	}
-}
-
 // operationsToChanges converts a slice of Operations to a slice of Changes
 func (tm *TransactionManager) operationsToChanges(transactionId string, operations *[]ops.Operation) []*Change {
 	var changes []*Change
 	for i := range *operations {
 		op := &(*operations)[i]
-		changes = append(changes, &Change{
+		change := &Change{
 			Operation: op,
 			Locks:     tm.determineNecessaryLocks(transactionId, operations),
-		})
+		}
+
+		// Set commit/rollback flags based on operation type
+		if op.Type == common.Commit {
+			change.Commit = true
+		} else if op.Type == common.Rollback {
+			change.Rollback = true
+		}
+
+		changes = append(changes, change)
 	}
 	return changes
 }
@@ -185,14 +246,18 @@ func (tm *TransactionManager) determineNecessaryLocks(transactionId string, oper
 
 	for i := range *operations {
 		op := &(*operations)[i]
-		if op.TableName != "" || op.Metadata.Name != "" {
+		resourceID := op.TableName
+		if resourceID == "" {
+			resourceID = op.Metadata.Name
+		}
+		if resourceID != "" {
 			lock := Lock{
-				ResourceID:    op.TableName,
+				ResourceID:    resourceID,
 				TransactionID: transactionId,
 				Type:          lockType,
 				Timestamp:     time.Now().Unix(),
 			}
-			locks[op.TableName] = lock
+			locks[resourceID] = lock
 		}
 	}
 	return locks

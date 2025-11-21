@@ -2,10 +2,11 @@ package operations
 
 import (
 	"LiminalDb/internal/database"
+	"fmt"
 )
 
 func (o *OperationsImpl) UpdateRows(op *Operation) *Result {
-	table, err := o.Serializer.ReadTableFromFile(op.TableName)
+	table, err := o.Serializer.ReadTableFromPath(o.getWorkingTablePath(op, op.TableName))
 	if err != nil {
 		return &Result{Err: err}
 	}
@@ -20,14 +21,14 @@ func (o *OperationsImpl) UpdateRows(op *Operation) *Result {
 		return &Result{Err: err}
 	}
 
-	err = o.UpdateTableWithRows(table, updatedRows)
+	err = o.UpdateTableWithRows(table, updatedRows, op)
 	if err != nil {
 		return &Result{Err: err}
 	}
 
 	// TODO: Update indexes after the index rework
 
-	return &Result{}
+	return &Result{Message: fmt.Sprintf("Successfully updated %d rows in %s", len(updatedRows), op.TableName)}
 }
 
 func rowsToUpdate(table *database.Table, filter Filter) ([][]any, error) {
@@ -60,7 +61,7 @@ func (o *OperationsImpl) updateRows(table *database.Table, rows [][]any, data ma
 	return rows, nil
 }
 
-func (o *OperationsImpl) UpdateTableWithRows(table *database.Table, rows [][]any) error {
+func (o *OperationsImpl) UpdateTableWithRows(table *database.Table, rows [][]any, op *Operation) error {
 	primaryKeyIndex, err := o.GetPrimaryKeyIndex(table)
 	if err != nil {
 		return err
@@ -76,7 +77,7 @@ func (o *OperationsImpl) UpdateTableWithRows(table *database.Table, rows [][]any
 		}
 	}
 
-	err = o.Serializer.WriteTableToFile(table, table.Metadata.Name)
+	err = o.writeTableWithShadow(op, table, table.Metadata.Name)
 	if err != nil {
 		return err
 	}

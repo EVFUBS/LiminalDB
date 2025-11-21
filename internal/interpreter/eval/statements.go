@@ -292,12 +292,18 @@ func (e *Evaluator) evaluateTransaction(stmt *ast.TransactionStatement) (*[]ops.
 		}
 
 		if _, ok := s.(*ast.CommitStatement); ok {
-			// Handle commit if needed
+			op := ops.Operation{
+				Type: common.Commit,
+			}
+			opsList = append(opsList, op)
 			continue
 		}
 
 		if _, ok := s.(*ast.RollbackStatement); ok {
-			// Handle rollback if needed
+			op := ops.Operation{
+				Type: common.Rollback,
+			}
+			opsList = append(opsList, op)
 			continue
 		}
 

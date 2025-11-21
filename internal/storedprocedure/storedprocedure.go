@@ -56,7 +56,6 @@ func (s *StoredProcedure) WriteToFile(filename string) error {
 		return err
 	}
 
-	// Create body file
 	bodyPath := filepath.Join(StoredProcDir, filename+FileExtension)
 	err = os.WriteFile(bodyPath, []byte(s.Body), 0644)
 	if err != nil {

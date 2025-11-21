@@ -18,6 +18,7 @@ var requestChannel chan *engine.Request
 
 func execute(sql string) (ops.Result, error) {
 	setupLogging()
+	sql = wrapSqlInCommitTransaction(sql)
 	operations, err := interpreter.Evaluate(sql)
 
 	if err != nil {
@@ -56,7 +57,7 @@ func TestCreateTable(t *testing.T) {
 		t.Fatalf("Failed to execute CREATE TABLE: %v", err)
 	}
 
-	tablePath := filepath.Join("./db/tables", "users"+database.FileExtension)
+	tablePath := filepath.Join("./db/tables/users", "users"+database.FileExtension)
 	if _, err := os.Stat(tablePath); os.IsNotExist(err) {
 		t.Errorf("Table file was not created at %s", tablePath)
 	}
@@ -206,13 +207,12 @@ func TestDropRow(t *testing.T) {
 }
 
 func TestDropTable(t *testing.T) {
-	defer cleanupDB(t)
 	_, err := execute("CREATE TABLE temp_table (id int primary key)")
 	if err != nil {
 		t.Fatalf("Failed to create table for drop table test: %v", err)
 	}
 
-	tablePath := filepath.Join("./db/tables", "temp_table"+database.FileExtension)
+	tablePath := filepath.Join("./db/tables/temp_table", "temp_table"+database.FileExtension)
 	if _, err := os.Stat(tablePath); os.IsNotExist(err) {
 		t.Fatalf("Table file was not created at %s before drop", tablePath)
 	}
@@ -432,7 +432,6 @@ func TestComplexQuery(t *testing.T) {
 // }
 
 func TestForeignKey(t *testing.T) {
-	defer cleanupDB(t)
 	result1, err := execute("CREATE TABLE customers (cid int primary key, name string(100))")
 	if err != nil {
 		t.Fatalf("Failed to create customers table: %v", err)
@@ -807,4 +806,9 @@ func assertSelectResult(t *testing.T, actualResult any, expected *database.Query
 				queryName, i, expected.Rows[i], actual.Rows[i])
 		}
 	}
+}
+
+func wrapSqlInCommitTransaction(sql string) string {
+	tranSql := "BEGIN TRAN \n" + sql + "\n COMMIT"
+	return tranSql
 }

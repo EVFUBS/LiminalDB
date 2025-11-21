@@ -83,7 +83,7 @@ func (b BinarySerializer) ReadFromFile(filename string) (*db.Table, *indexing.In
 		return nil, index, nil
 	}
 
-	table, err := b.ReadTableFromFile(filename)
+	table, err := b.ReadTableFromPath(filename)
 	if err != nil {
 		return nil, nil, err
 	}

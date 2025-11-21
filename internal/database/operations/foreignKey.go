@@ -5,10 +5,10 @@ import (
 	"fmt"
 )
 
-func (o *OperationsImpl) writeForeignKeyCheck(table *database.Table, newRow []any) error {
+func (o *OperationsImpl) writeForeignKeyCheck(op *Operation, table *database.Table, newRow []any) error {
 	for _, foreignKey := range table.Metadata.ForeignKeys {
 
-		refTable, err := o.Serializer.ReadTableFromFile(foreignKey.ReferencedTable)
+		refTable, err := o.Serializer.ReadTableFromPath(o.getWorkingTablePath(op, foreignKey.ReferencedTable))
 		if err != nil {
 			return fmt.Errorf("failed to read referenced table %s: %w", foreignKey.ReferencedTable, err)
 		}
@@ -77,7 +77,7 @@ func (o *OperationsImpl) deleteRowForeignKeyCheck(table *database.Table, rowsToD
 			continue
 		}
 
-		otherTable, err := o.Serializer.ReadTableFromFile(otherTableName)
+		otherTable, err := o.Serializer.ReadTableFromPath(otherTableName)
 		if err != nil {
 			return fmt.Errorf("failed to read table %s for foreign key check: %w", otherTableName, err)
 		}

@@ -2,16 +2,13 @@ package serializer
 
 import (
 	db "LiminalDb/internal/database"
+	"LiminalDb/internal/database/common"
 	"bytes"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 )
-
-func GetTableFilePath(filename string) string {
-	return filepath.Join(db.TableDir, filename+db.FileExtension)
-}
 
 func (b BinarySerializer) SerializeTable(table *db.Table) ([]byte, error) {
 	buf := new(bytes.Buffer)
@@ -79,10 +76,8 @@ func (b BinarySerializer) DeserializeTable(data []byte) (*db.Table, error) {
 	return &db.Table{Header: header, Metadata: metadata, Data: rows}, nil
 }
 
-func (b BinarySerializer) ReadTableFromFile(filename string) (*db.Table, error) {
-	filename = GetTableFilePath(filename)
-
-	file, err := os.Open(filename)
+func (b BinarySerializer) ReadTableFromPath(path string) (*db.Table, error) {
+	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +115,12 @@ func (b BinarySerializer) ListTables() ([]string, error) {
 	return tableNames, nil
 }
 
-func (b BinarySerializer) WriteTableToFile(table *db.Table, filename string) error {
+func (b BinarySerializer) WriteTable(table *db.Table, dbFileName string) error {
+	return b.WriteTableToPath(table, dbFileName, "")
+}
+
+// WriteTableToPath writes a table to a specific path (used for shadow files)
+func (b BinarySerializer) WriteTableToPath(table *db.Table, dbFileName string, targetPath string) error {
 	serialisedTable, err := b.SerializeTable(table)
 	if err != nil {
 		return err
@@ -133,9 +133,20 @@ func (b BinarySerializer) WriteTableToFile(table *db.Table, filename string) err
 		}
 	}
 
-	filename = GetTableFilePath(filename)
+	var filePath string
+	if targetPath != "" {
+		// Use the provided target path (for shadow files)
+		filePath = targetPath
+	} else {
+		// Use the standard path
+		path, err := common.CreateTableFolder(dbFileName)
+		if err != nil {
+			return err
+		}
+		filePath = filepath.Join(path, dbFileName+db.FileExtension)
+	}
 
-	file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}

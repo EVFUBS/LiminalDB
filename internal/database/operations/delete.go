@@ -4,13 +4,12 @@ import (
 	"LiminalDb/internal/database"
 	"LiminalDb/internal/database/indexing"
 	"fmt"
-	"os"
 )
 
 func (o *OperationsImpl) DeleteRows(op *Operation) *Result {
 	logger.Info("Deleting rows from table: %s", op.TableName)
 
-	table, err := o.Serializer.ReadTableFromFile(op.TableName)
+	table, err := o.Serializer.ReadTableFromPath(o.getWorkingTablePath(op, op.TableName))
 	if err != nil {
 		return &Result{Err: err}
 	}
@@ -27,7 +26,7 @@ func (o *OperationsImpl) DeleteRows(op *Operation) *Result {
 
 	indexes := make(map[string]*indexing.Index)
 	for _, idx := range table.Metadata.Indexes {
-		index, err := o.loadIndex(op.TableName, idx.Name)
+		index, err := o.loadIndex(op, op.TableName, idx.Name)
 		if err != nil {
 			logger.Error("Failed to load index %s: %v", idx.Name, err)
 			continue
@@ -91,13 +90,12 @@ func (o *OperationsImpl) DeleteRows(op *Operation) *Result {
 				continue
 			}
 
-			indexFilePath := getIndexFilePath(op.TableName, idxName)
-			if err := os.WriteFile(indexFilePath, indexBytes, 0666); err != nil {
-				logger.Error("Failed to write index file %s: %v", indexFilePath, err)
+			if err := o.writeIndexWithShadow(op, indexBytes, op.TableName, idxName); err != nil {
+				logger.Error("Failed to write index file %s: %v", idxName, err)
 			}
 		}
 
-		err = o.Serializer.WriteTableToFile(table, op.TableName)
+		err = o.writeTableWithShadow(op, table, op.TableName)
 		if err != nil {
 			return &Result{Err: fmt.Errorf("failed to write updated table: %w", err)}
 		}

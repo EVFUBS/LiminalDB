@@ -118,7 +118,7 @@ func cleanupDBDir() {
 }
 
 func TestMain(m *testing.M) {
-	cleanupDBDir()
+	//defer cleanupDBDir()
 	go server.StartServer()
 	helpers.WaitForServer()
 	code := m.Run()
@@ -126,7 +126,6 @@ func TestMain(m *testing.M) {
 }
 
 func TestSingleTransaction(t *testing.T) {
-	cleanupDBDir()
 	sql := strings.Join([]string{
 		"BEGIN TRAN",
 		"CREATE TABLE single_tx (id int primary key, value string(50))",
@@ -154,7 +153,7 @@ func TestSingleTransaction(t *testing.T) {
 		t.Fatalf("expected result to contain 'test', got: %s", rowValue)
 	}
 
-	path := filepath.Join("./db/tables", "single_tx.bin")
+	path := filepath.Join("./db/tables/single_tx/", "single_tx.bin")
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("expected table file to exist: %v", err)
 	}
@@ -196,7 +195,7 @@ func TestTransactionCommit(t *testing.T) {
 		t.Fatalf("expected 1 row, got %d", rowCount)
 	}
 
-	path := filepath.Join("./db/tables", "tx_users.bin")
+	path := filepath.Join("./db/tables/tx_users", "tx_users.bin")
 	if _, statErr := os.Stat(path); statErr != nil {
 		t.Fatalf("expected table file to exist: %v", statErr)
 	}
@@ -375,8 +374,6 @@ func TestConcurrentInsertsDifferentTables(t *testing.T) {
 			t.Fatalf("expected %d rows in %s, got %d", insertsPerTable, tableName, rowCount)
 		}
 	}
-
-	t.Logf("Successfully inserted %d rows across %d tables with no lock contention", successCount, numTables)
 }
 
 func TestConcurrentReadersDuringWrites(t *testing.T) {

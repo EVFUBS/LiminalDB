@@ -24,12 +24,13 @@ type IndexQuery struct {
 	Index         *indexing.Index
 	IndexMetaData *database.IndexMetadata
 	IndexKey      any
+	Op            *Operation
 }
 
 func (o *OperationsImpl) ReadMetadata(op *Operation) *Result {
 	logger.Debug("Reading metadata for table: %s", op.TableName)
 
-	table, err := o.Serializer.ReadTableFromFile(op.TableName)
+	table, err := o.Serializer.ReadTableFromPath(o.getWorkingTablePath(op, op.TableName))
 	if err != nil {
 		logger.Error("Failed to read metadata for table %s: %v", op.TableName, err)
 		return &Result{Err: err}
@@ -42,7 +43,7 @@ func (o *OperationsImpl) ReadMetadata(op *Operation) *Result {
 func (o *OperationsImpl) ReadRows(op *Operation) *Result {
 	logger.Debug("Reading rows from table: %s", op.TableName)
 
-	table, err := o.Serializer.ReadTableFromFile(op.TableName)
+	table, err := o.Serializer.ReadTableFromPath(o.getWorkingTablePath(op, op.TableName))
 	if err != nil {
 		logger.Error("Failed to read rows from table %s: %v", op.TableName, err)
 		return &Result{Err: err}
@@ -65,6 +66,7 @@ func (o *OperationsImpl) ReadRows(op *Operation) *Result {
 		Index:         nil,
 		IndexMetaData: nil,
 		IndexKey:      nil,
+		Op:            op,
 	}, op.Where)
 	if err != nil {
 		logger.Error("Failed to read rows using index: %v", err)
@@ -112,7 +114,7 @@ func (o *OperationsImpl) ReadRowsUsingIndex(indexQuery *IndexQuery, where ast.Ex
 	indexInfo, indexKey := o.findBestIndexColumn(indexQuery.Table, where)
 
 	if indexInfo != nil && indexKey != nil {
-		index, err := o.loadIndex(indexQuery.TableName, indexInfo.Name)
+		index, err := o.loadIndex(indexQuery.Op, indexQuery.TableName, indexInfo.Name)
 		if err != nil {
 			logger.Error("Failed to load index %s: %v", indexInfo.Name, err)
 		} else {

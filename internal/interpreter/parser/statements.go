@@ -250,6 +250,7 @@ func (p *Parser) parseCreateTableStatement() (*ast.CreateTableStatement, error) 
 				},
 			},
 		})
+		p.NextToken()
 	}
 
 	if !p.expectPeek(RPAREN) {
