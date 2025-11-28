@@ -13,6 +13,13 @@ func (o *OperationsImpl) WriteRows(op *Operation) *Result {
 	if err != nil {
 		return &Result{Err: err}
 	}
+	if table.File != nil {
+		defer table.File.Close()
+	}
+
+	if err := o.LoadAllRows(table); err != nil {
+		return &Result{Err: err}
+	}
 
 	logger.Debug("Checking primary key constraints for rows: %v", op.Data)
 	for _, newRow := range op.Data.Insert {

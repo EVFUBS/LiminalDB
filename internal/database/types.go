@@ -34,9 +34,12 @@ type DatabaseFile struct {
 }
 
 type Table struct {
-	Header   FileHeader
-	Metadata TableMetadata
-	Data     [][]any
+	Header     FileHeader
+	Metadata   TableMetadata
+	Data       [][]any
+	RowOffsets []int64
+	File       *os.File
+	Mutex      sync.Mutex
 }
 
 type FileHeader struct {

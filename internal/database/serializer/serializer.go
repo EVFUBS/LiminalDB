@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"io"
 	"strings"
 )
 
@@ -67,6 +68,29 @@ func (b BinarySerializer) readString(buf *bytes.Reader) (string, error) {
 	}
 
 	return string(strBytes), nil
+}
+
+func (b BinarySerializer) SerializeInt64Array(data []int64) ([]byte, error) {
+	buf := new(bytes.Buffer)
+	if err := binary.Write(buf, binary.LittleEndian, int64(len(data))); err != nil {
+		return nil, err
+	}
+	if err := binary.Write(buf, binary.LittleEndian, data); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (b BinarySerializer) DeserializeInt64Array(r io.Reader) ([]int64, error) {
+	var length int64
+	if err := binary.Read(r, binary.LittleEndian, &length); err != nil {
+		return nil, err
+	}
+	data := make([]int64, length)
+	if err := binary.Read(r, binary.LittleEndian, &data); err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 func (b BinarySerializer) ReadFromFile(filename string) (*db.Table, *indexing.Index, error) {

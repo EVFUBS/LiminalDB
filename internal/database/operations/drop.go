@@ -18,6 +18,9 @@ func (o *OperationsImpl) DropTable(op *Operation) *Result {
 		logger.Error("Failed to read table %s: %v", op.TableName, err)
 		return &Result{Err: err}
 	}
+	if table.File != nil {
+		table.File.Close()
+	}
 
 	// Delete index files from working path (shadow or real)
 	for _, idx := range table.Metadata.Indexes {
@@ -52,6 +55,13 @@ func (o *OperationsImpl) DropConstraint(op *Operation) *Result {
 	table, err := o.Serializer.ReadTableFromPath(o.getWorkingTablePath(op, op.TableName))
 	if err != nil {
 		logger.Error("Failed to read table %s: %v", op.TableName, err)
+		return &Result{Err: err}
+	}
+	if table.File != nil {
+		defer table.File.Close()
+	}
+
+	if err := o.LoadAllRows(table); err != nil {
 		return &Result{Err: err}
 	}
 

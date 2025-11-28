@@ -10,6 +10,13 @@ func (o *OperationsImpl) UpdateRows(op *Operation) *Result {
 	if err != nil {
 		return &Result{Err: err}
 	}
+	if table.File != nil {
+		defer table.File.Close()
+	}
+
+	if err := o.LoadAllRows(table); err != nil {
+		return &Result{Err: err}
+	}
 
 	rows, err := rowsToUpdate(table, op.Filter)
 	if err != nil {

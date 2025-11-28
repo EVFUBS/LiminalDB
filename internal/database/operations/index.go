@@ -19,8 +19,8 @@ func (o *OperationsImpl) findBestIndexColumn(table *database.Table, where ast.Ex
 		return nil, nil
 	}
 
-	colNameFromFilter, valFromFilter, foundEquality := extractAssignment(where)
-	if !foundEquality {
+	assignments := extractAssignments(where)
+	if len(assignments) == 0 {
 		return nil, nil
 	}
 
@@ -28,11 +28,12 @@ func (o *OperationsImpl) findBestIndexColumn(table *database.Table, where ast.Ex
 	for i := range table.Metadata.Indexes {
 		idx := &table.Metadata.Indexes[i]
 
-		// Only consider single-column indexes that match the equality condition.
-		// TODO: Extend to support composite indexes. This would involve checking if the 'where'
-		// clause provides values for the leading columns of a composite index.
-		if len(idx.Columns) == 1 && idx.Columns[0] == colNameFromFilter {
-			candidates = append(candidates, candidateIndex{index: idx, key: valFromFilter})
+		// TODO: Extend to multi-column indexes
+		if len(idx.Columns) == 1 {
+			colName := idx.Columns[0]
+			if val, ok := assignments[colName]; ok {
+				candidates = append(candidates, candidateIndex{index: idx, key: val})
+			}
 		}
 	}
 
@@ -132,6 +133,13 @@ func (o *OperationsImpl) CreateIndex(op *Operation) *Result {
 		logger.Error("Failed to read table %s: %v", op.TableName, err)
 		return &Result{Err: err}
 	}
+	if table.File != nil {
+		defer table.File.Close()
+	}
+
+	if err := o.LoadAllRows(table); err != nil {
+		return &Result{Err: err}
+	}
 
 	for _, idx := range table.Metadata.Indexes {
 		if idx.Name == op.IndexName {
@@ -206,6 +214,13 @@ func (o *OperationsImpl) DropIndex(op *Operation) *Result {
 		logger.Error("Failed to read table %s: %v", op.TableName, err)
 		return &Result{Err: err}
 	}
+	if table.File != nil {
+		defer table.File.Close()
+	}
+
+	if err := o.LoadAllRows(table); err != nil {
+		return &Result{Err: err}
+	}
 
 	indexFound := false
 	for i, idx := range table.Metadata.Indexes {
@@ -224,7 +239,6 @@ func (o *OperationsImpl) DropIndex(op *Operation) *Result {
 		return &Result{Err: fmt.Errorf("index %s not found on table %s", op.IndexName, op.TableName)}
 	}
 
-	// Delete the index file from the working path (shadow or real)
 	workingIndexPath := o.getWorkingIndexPath(op, op.TableName, op.IndexName)
 	if err := os.Remove(workingIndexPath); err != nil && !os.IsNotExist(err) {
 		return &Result{Err: fmt.Errorf("failed to delete index file: %w", err)}
@@ -245,6 +259,9 @@ func (o *OperationsImpl) ListIndexes(op *Operation) *Result {
 	if err != nil {
 		logger.Error("Failed to read table %s: %v", op.TableName, err)
 		return &Result{Err: err}
+	}
+	if table.File != nil {
+		defer table.File.Close()
 	}
 
 	return &Result{IndexMetaData: table.Metadata.Indexes}

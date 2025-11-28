@@ -25,7 +25,27 @@ func (b BinarySerializer) SerializeTable(table *db.Table) ([]byte, error) {
 		return nil, err
 	}
 
-	dataOffset := uint32(len(headerBytes)) + metadataLength
+	var rowDataBuffer bytes.Buffer
+	var offsets []int64
+	currentOffset := int64(0)
+
+	dataBytes := make([][]byte, len(table.Data))
+	for i, row := range table.Data {
+		dataBytes[i], err = b.SerializeRow(row, table.Metadata.Columns)
+		if err != nil {
+			return nil, err
+		}
+		offsets = append(offsets, currentOffset)
+		n, _ := rowDataBuffer.Write(dataBytes[i])
+		currentOffset += int64(n)
+	}
+
+	offsetsBytes, err := b.SerializeInt64Array(offsets)
+	if err != nil {
+		return nil, err
+	}
+
+	dataOffset := uint32(len(headerBytes)) + metadataLength + uint32(len(offsetsBytes))
 	table.Metadata.DataOffset = dataOffset
 	table.Metadata.RowCount = int64(len(table.Data))
 	table.Metadata.ColumnCount = int64(len(table.Metadata.Columns))
@@ -35,19 +55,10 @@ func (b BinarySerializer) SerializeTable(table *db.Table) ([]byte, error) {
 		return nil, err
 	}
 
-	dataBytes := make([][]byte, len(table.Data))
-	for i, row := range table.Data {
-		dataBytes[i], err = b.SerializeRow(row, table.Metadata.Columns)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	buf.Write(headerBytes)
 	buf.Write(metadataBytes)
-	for _, row := range dataBytes {
-		buf.Write(row)
-	}
+	buf.Write(offsetsBytes)
+	buf.Write(rowDataBuffer.Bytes())
 
 	return buf.Bytes(), nil
 }
@@ -65,6 +76,11 @@ func (b BinarySerializer) DeserializeTable(data []byte) (*db.Table, error) {
 		return nil, err
 	}
 
+	offsets, err := b.DeserializeInt64Array(buf)
+	if err != nil {
+		return nil, err
+	}
+
 	rows := make([][]any, metadata.RowCount)
 	for i := range rows {
 		rows[i], err = b.DeserializeRow(buf, metadata.Columns)
@@ -73,7 +89,7 @@ func (b BinarySerializer) DeserializeTable(data []byte) (*db.Table, error) {
 		}
 	}
 
-	return &db.Table{Header: header, Metadata: metadata, Data: rows}, nil
+	return &db.Table{Header: header, Metadata: metadata, Data: rows, RowOffsets: offsets}, nil
 }
 
 func (b BinarySerializer) ReadTableFromPath(path string) (*db.Table, error) {
@@ -81,14 +97,46 @@ func (b BinarySerializer) ReadTableFromPath(path string) (*db.Table, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
 
-	serialisedTable, err := io.ReadAll(file)
-	if err != nil {
+	// Read Header
+	headerBytes := make([]byte, 10) // Magic(4) + Version(2) + MetadataLength(4)
+	if _, err := io.ReadFull(file, headerBytes); err != nil {
+		file.Close()
 		return nil, err
 	}
 
-	return b.DeserializeTable(serialisedTable)
+	header, err := b.DeserializeHeader(bytes.NewReader(headerBytes))
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+
+	// Read Metadata
+	metadataBytes := make([]byte, header.MetadataLength)
+	if _, err := io.ReadFull(file, metadataBytes); err != nil {
+		file.Close()
+		return nil, err
+	}
+
+	metadata, err := b.DeserializeMetadata(bytes.NewReader(metadataBytes))
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+
+	// Read Offsets
+	offsets, err := b.DeserializeInt64Array(file)
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+
+	return &db.Table{
+		Header:     header,
+		Metadata:   metadata,
+		RowOffsets: offsets,
+		File:       file,
+	}, nil
 }
 
 func (b BinarySerializer) ListTables() ([]string, error) {

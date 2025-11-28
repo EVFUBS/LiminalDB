@@ -13,6 +13,13 @@ func (o *OperationsImpl) DeleteRows(op *Operation) *Result {
 	if err != nil {
 		return &Result{Err: err}
 	}
+	if table.File != nil {
+		defer table.File.Close()
+	}
+
+	if err := o.LoadAllRows(table); err != nil {
+		return &Result{Err: err}
+	}
 
 	rowsToDelete, err := o.DetermineRowsToDelete(table, op.Filter)
 	if err != nil {

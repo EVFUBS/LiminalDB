@@ -9,6 +9,13 @@ func (o *OperationsImpl) AddColumnsToTable(op *Operation) *Result {
 	if err != nil {
 		return &Result{Err: err}
 	}
+	if table.File != nil {
+		defer table.File.Close()
+	}
+
+	if err := o.LoadAllRows(table); err != nil {
+		return &Result{Err: err}
+	}
 
 	for _, newCol := range op.Columns {
 		if len(table.Data) == 0 {
