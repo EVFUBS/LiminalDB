@@ -2,6 +2,7 @@ package interpreter
 
 import (
 	"LiminalDb/internal/database"
+	"LiminalDb/internal/database/operations"
 	l "LiminalDb/internal/logger"
 	"bufio"
 	"bytes"
@@ -146,26 +147,26 @@ func execRemote(sql string) (string, error) {
 	return r.Result, nil
 }
 
-func FormatResult(result any) string {
-	switch v := result.(type) {
-	case *database.Table:
-		return formatTableResult(v)
-	case database.TableMetadata:
-		return formatTableMetadata(v)
-	case *database.QueryResult:
-		return formatQueryResult(v)
-	case []any:
-		var sb strings.Builder
-		for _, item := range v {
-			sb.WriteString(FormatResult(item))
-			sb.WriteString("\n")
-		}
-		return sb.String()
-	case string:
-		return v
-	default:
-		return fmt.Sprintf("%v", v)
+func FormatResult(result operations.Result) string {
+	if result.Metadata != nil {
+		return formatTableMetadata(*result.Metadata)
 	}
+
+	if result.Table != nil {
+		return formatTableResult(result.Table)
+	}
+
+	resultString, err := formatQueryResult(result.Data)
+
+	if err != nil && result.Message != "" {
+		return result.Message
+	}
+
+	if err != nil {
+		return err.Error()
+	}
+
+	return resultString
 }
 
 func formatTableResult(table *database.Table) string {
@@ -278,9 +279,13 @@ func formatTableMetadata(metadata database.TableMetadata) string {
 	return sb.String()
 }
 
-func formatQueryResult(result *database.QueryResult) string {
+func formatQueryResult(result *database.QueryResult) (string, error) {
+	if result == nil {
+		return "", fmt.Errorf("result is nil")
+	}
+
 	if len(result.Rows) == 0 {
-		return "No rows found"
+		return "Empty set", nil
 	}
 
 	var sb strings.Builder
@@ -297,7 +302,7 @@ func formatQueryResult(result *database.QueryResult) string {
 	writeTableFooter(&sb, colWidths)
 	sb.WriteString(fmt.Sprintf("%d row(s) in set\n", len(result.Rows)))
 
-	return sb.String()
+	return sb.String(), nil
 }
 
 // Utility functions

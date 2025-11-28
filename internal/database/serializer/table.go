@@ -2,16 +2,13 @@ package serializer
 
 import (
 	db "LiminalDb/internal/database"
+	"LiminalDb/internal/database/common"
 	"bytes"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 )
-
-func GetTableFilePath(filename string) string {
-	return filepath.Join(db.TableDir, filename+db.FileExtension)
-}
 
 func (b BinarySerializer) SerializeTable(table *db.Table) ([]byte, error) {
 	buf := new(bytes.Buffer)
@@ -28,7 +25,27 @@ func (b BinarySerializer) SerializeTable(table *db.Table) ([]byte, error) {
 		return nil, err
 	}
 
-	dataOffset := uint32(len(headerBytes)) + metadataLength
+	var rowDataBuffer bytes.Buffer
+	var offsets []int64
+	currentOffset := int64(0)
+
+	dataBytes := make([][]byte, len(table.Data))
+	for i, row := range table.Data {
+		dataBytes[i], err = b.SerializeRow(row, table.Metadata.Columns)
+		if err != nil {
+			return nil, err
+		}
+		offsets = append(offsets, currentOffset)
+		n, _ := rowDataBuffer.Write(dataBytes[i])
+		currentOffset += int64(n)
+	}
+
+	offsetsBytes, err := b.SerializeInt64Array(offsets)
+	if err != nil {
+		return nil, err
+	}
+
+	dataOffset := uint32(len(headerBytes)) + metadataLength + uint32(len(offsetsBytes))
 	table.Metadata.DataOffset = dataOffset
 	table.Metadata.RowCount = int64(len(table.Data))
 	table.Metadata.ColumnCount = int64(len(table.Metadata.Columns))
@@ -38,19 +55,10 @@ func (b BinarySerializer) SerializeTable(table *db.Table) ([]byte, error) {
 		return nil, err
 	}
 
-	dataBytes := make([][]byte, len(table.Data))
-	for i, row := range table.Data {
-		dataBytes[i], err = b.SerializeRow(row, table.Metadata.Columns)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	buf.Write(headerBytes)
 	buf.Write(metadataBytes)
-	for _, row := range dataBytes {
-		buf.Write(row)
-	}
+	buf.Write(offsetsBytes)
+	buf.Write(rowDataBuffer.Bytes())
 
 	return buf.Bytes(), nil
 }
@@ -68,6 +76,11 @@ func (b BinarySerializer) DeserializeTable(data []byte) (*db.Table, error) {
 		return nil, err
 	}
 
+	offsets, err := b.DeserializeInt64Array(buf)
+	if err != nil {
+		return nil, err
+	}
+
 	rows := make([][]any, metadata.RowCount)
 	for i := range rows {
 		rows[i], err = b.DeserializeRow(buf, metadata.Columns)
@@ -76,24 +89,54 @@ func (b BinarySerializer) DeserializeTable(data []byte) (*db.Table, error) {
 		}
 	}
 
-	return &db.Table{Header: header, Metadata: metadata, Data: rows}, nil
+	return &db.Table{Header: header, Metadata: metadata, Data: rows, RowOffsets: offsets}, nil
 }
 
-func (b BinarySerializer) ReadTableFromFile(filename string) (*db.Table, error) {
-	filename = GetTableFilePath(filename)
-
-	file, err := os.Open(filename)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	serialisedTable, err := io.ReadAll(file)
+func (b BinarySerializer) ReadTableFromPath(path string) (*db.Table, error) {
+	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 
-	return b.DeserializeTable(serialisedTable)
+	// Read Header
+	headerBytes := make([]byte, 10) // Magic(4) + Version(2) + MetadataLength(4)
+	if _, err := io.ReadFull(file, headerBytes); err != nil {
+		file.Close()
+		return nil, err
+	}
+
+	header, err := b.DeserializeHeader(bytes.NewReader(headerBytes))
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+
+	// Read Metadata
+	metadataBytes := make([]byte, header.MetadataLength)
+	if _, err := io.ReadFull(file, metadataBytes); err != nil {
+		file.Close()
+		return nil, err
+	}
+
+	metadata, err := b.DeserializeMetadata(bytes.NewReader(metadataBytes))
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+
+	// Read Offsets
+	offsets, err := b.DeserializeInt64Array(file)
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+
+	return &db.Table{
+		Header:     header,
+		Metadata:   metadata,
+		RowOffsets: offsets,
+		File:       file,
+	}, nil
 }
 
 func (b BinarySerializer) ListTables() ([]string, error) {
@@ -120,7 +163,12 @@ func (b BinarySerializer) ListTables() ([]string, error) {
 	return tableNames, nil
 }
 
-func (b BinarySerializer) WriteTableToFile(table *db.Table, filename string) error {
+func (b BinarySerializer) WriteTable(table *db.Table, dbFileName string) error {
+	return b.WriteTableToPath(table, dbFileName, "")
+}
+
+// WriteTableToPath writes a table to a specific path (used for shadow files)
+func (b BinarySerializer) WriteTableToPath(table *db.Table, dbFileName string, targetPath string) error {
 	serialisedTable, err := b.SerializeTable(table)
 	if err != nil {
 		return err
@@ -133,9 +181,20 @@ func (b BinarySerializer) WriteTableToFile(table *db.Table, filename string) err
 		}
 	}
 
-	filename = GetTableFilePath(filename)
+	var filePath string
+	if targetPath != "" {
+		// Use the provided target path (for shadow files)
+		filePath = targetPath
+	} else {
+		// Use the standard path
+		path, err := common.CreateTableFolder(dbFileName)
+		if err != nil {
+			return err
+		}
+		filePath = filepath.Join(path, dbFileName+db.FileExtension)
+	}
 
-	file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}

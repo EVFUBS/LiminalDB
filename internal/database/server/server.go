@@ -1,6 +1,8 @@
 package server
 
 import (
+	"LiminalDb/internal/database/engine"
+	ops "LiminalDb/internal/database/operations"
 	"LiminalDb/internal/interpreter"
 	e "LiminalDb/internal/interpreter/eval"
 	l "LiminalDb/internal/logger"
@@ -8,18 +10,20 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 var logger *l.Logger
 var eval *e.Evaluator
+var requestChannel chan *engine.Request
 
 type sqlRequest struct {
 	SQL string `json:"sql"`
 }
 
 type sqlResponse struct {
-	Success bool   `json:"success"`
-	Result  string `json:"result"`
+	Success bool       `json:"success"`
+	Result  ops.Result `json:"result"`
 }
 
 func StartServer() {
@@ -29,6 +33,12 @@ func StartServer() {
 	l.New("sql", "logs", l.ERROR)
 	eval = interpreter.SetupEvaluator()
 
+	stop := make(chan any)
+	requestChannel = make(chan *engine.Request, 100) // Buffered to handle bursts
+
+	engine := engine.NewEngine()
+	go engine.StartEngine(requestChannel, stop)
+
 	mux := http.NewServeMux()
 
 	// Health & readiness
@@ -37,7 +47,6 @@ func StartServer() {
 	// Transactions
 	// POST /tx           -> begin a new transaction
 	// GET  /tx           -> list active transactions
-	mux.HandleFunc("/tx", txCollectionHandler)
 
 	// Resource-style handlers for tx id and subpaths:
 	// GET  /tx/{id}                -> inspect tx
@@ -53,7 +62,7 @@ func StartServer() {
 
 	// Administrative / diagnostics
 	// GET /locks -> show lock table / wait queues
-	mux.HandleFunc("/locks", locksHandler)
+	// mux.HandleFunc("/locks", locksHandler)
 
 	// GET/POST/PATCH/DELETE /tables/{name}/rows -> CRUD rows
 	mux.HandleFunc("/tables/", tableResourceHandler)
@@ -71,33 +80,6 @@ func StartServer() {
 // health returns 200 OK for liveness checks
 func health(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-}
-
-// txCollectionHandler handles /tx for creating/listing transactions
-func txCollectionHandler(w http.ResponseWriter, r *http.Request) {
-	// POST /tx -> begin a new transaction (return txID)
-	// GET  /tx -> list active transactions (admin/debug)
-
-	if r.Method == http.MethodGet {
-		activeTransactions := eval.TransactionManager.ActiveTransactions
-		activeTransactionsBytes, err := json.Marshal(activeTransactions)
-		if err != nil {
-			logger.Error("Failed to marshal active transactions: %v", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(activeTransactionsBytes)
-		return
-	}
-
-	if r.Method == http.MethodPost {
-
-	}
-
-	http.Error(w, "Not Implemented", http.StatusNotImplemented)
 }
 
 // txResourceHandler handles /tx/{txID} and subpaths like /commit, /rollback, /exec, /kill
@@ -129,49 +111,64 @@ func execHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tranSql := wrapSqlInCommitTransaction(req.SQL)
-	result, err := eval.Execute(tranSql)
+	operations, err := eval.Evaluate(tranSql)
 	if err != nil {
 		logger.Error("Failed to execute SQL: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	formatted := interpreter.FormatResult(result)
-	response := sqlResponse{Success: true, Result: formatted}
-	responseBytes, err := json.Marshal(response)
-	if err != nil {
-		logger.Error("Failed to marshal response: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	responseCh := make(chan []ops.Result, 1)
+
+	requestChannel <- &engine.Request{
+		Operations: operations,
+		ResponseCh: responseCh,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(responseBytes)
+	select {
+	case result := <-responseCh:
+		var lastResult = result[len(result)-1]
+		response := sqlResponse{Success: true, Result: lastResult}
+		responseBytes, err := json.Marshal(response)
+		if err != nil {
+			logger.Error("Failed to marshal response: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(responseBytes)
+
+	case <-time.After(30 * time.Second):
+		// Timeout - engine never responded
+		logger.Error("Request timeout: engine did not respond within 30 seconds")
+		http.Error(w, "Request timeout", http.StatusRequestTimeout)
+	}
 }
 
 // locksHandler returns lock table / wait queues for diagnostics
-func locksHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		logger.Error("Invalid method used: %s", r.Method)
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+// func locksHandler(w http.ResponseWriter, r *http.Request) {
+// 	if r.Method != http.MethodGet {
+// 		logger.Error("Invalid method used: %s", r.Method)
+// 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+// 		return
+// 	}
 
-	lockSnapshot := eval.TransactionManager.LockManager.GetLockQueueSnapshot()
-	lockSnapshotBytes, err := json.Marshal(lockSnapshot)
-	if err != nil {
-		logger.Error("Failed to marshal lock snapshot: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+// 	lockSnapshot := eval.TransactionManager.LockManager.GetLockQueueSnapshot()
+// 	lockSnapshotBytes, err := json.Marshal(lockSnapshot)
+// 	if err != nil {
+// 		logger.Error("Failed to marshal lock snapshot: %v", err)
+// 		http.Error(w, err.Error(), http.StatusInternalServerError)
+// 		return
+// 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(lockSnapshotBytes)
-}
+// 	w.Header().Set("Content-Type", "application/json")
+// 	w.WriteHeader(http.StatusOK)
+// 	_, _ = w.Write(lockSnapshotBytes)
+// }
 
-// tableResourceHandler handles /tables/{name} and subpaths like /rows
+// tableResourceHandler handles /tables/{name} and sub paths like /rows
 func tableResourceHandler(w http.ResponseWriter, r *http.Request) {
 	// Paths:
 	//  /tables/{name}

@@ -4,7 +4,9 @@ import (
 	"LiminalDb/internal/ast"
 	"LiminalDb/internal/database"
 	"LiminalDb/internal/database/indexing"
+	"bytes"
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -24,15 +26,19 @@ type IndexQuery struct {
 	Index         *indexing.Index
 	IndexMetaData *database.IndexMetadata
 	IndexKey      any
+	Op            *Operation
 }
 
 func (o *OperationsImpl) ReadMetadata(op *Operation) *Result {
 	logger.Debug("Reading metadata for table: %s", op.TableName)
 
-	table, err := o.Serializer.ReadTableFromFile(op.TableName)
+	table, err := o.Serializer.ReadTableFromPath(o.getWorkingTablePath(op, op.TableName))
 	if err != nil {
 		logger.Error("Failed to read metadata for table %s: %v", op.TableName, err)
 		return &Result{Err: err}
+	}
+	if table.File != nil {
+		defer table.File.Close()
 	}
 
 	logger.Debug("Successfully read metadata for table %s", op.TableName)
@@ -42,10 +48,13 @@ func (o *OperationsImpl) ReadMetadata(op *Operation) *Result {
 func (o *OperationsImpl) ReadRows(op *Operation) *Result {
 	logger.Debug("Reading rows from table: %s", op.TableName)
 
-	table, err := o.Serializer.ReadTableFromFile(op.TableName)
+	table, err := o.Serializer.ReadTableFromPath(o.getWorkingTablePath(op, op.TableName))
 	if err != nil {
 		logger.Error("Failed to read rows from table %s: %v", op.TableName, err)
 		return &Result{Err: err}
+	}
+	if table.File != nil {
+		defer table.File.Close()
 	}
 
 	// this needs to be unified
@@ -65,6 +74,7 @@ func (o *OperationsImpl) ReadRows(op *Operation) *Result {
 		Index:         nil,
 		IndexMetaData: nil,
 		IndexKey:      nil,
+		Op:            op,
 	}, op.Where)
 	if err != nil {
 		logger.Error("Failed to read rows using index: %v", err)
@@ -90,7 +100,13 @@ func (o *OperationsImpl) ReadRows(op *Operation) *Result {
 func (o *OperationsImpl) ReadRowsFullScan(table *database.Table, columns []string, filter Filter, result *database.QueryResult) (*database.QueryResult, error) {
 	logger.Debug("Reading rows from table: %s", table.Metadata.Name)
 	logger.Debug("Performing full table scan on table %s", table.Metadata.Name)
-	for _, row := range table.Data {
+	for i := range table.RowOffsets {
+		row, err := o.ReadRowAt(table, int64(i))
+		if err != nil {
+			logger.Error("Failed to read row %d from table %s: %v", i, table.Metadata.Name, err)
+			return nil, err
+		}
+
 		selectedRow, err := o.ReadRowFilterWithRequestedColumns(row, columns, table, filter)
 		if err != nil {
 			logger.Error("Failed to select row columns from table %s: %v", table.Metadata.Name, err)
@@ -112,7 +128,7 @@ func (o *OperationsImpl) ReadRowsUsingIndex(indexQuery *IndexQuery, where ast.Ex
 	indexInfo, indexKey := o.findBestIndexColumn(indexQuery.Table, where)
 
 	if indexInfo != nil && indexKey != nil {
-		index, err := o.loadIndex(indexQuery.TableName, indexInfo.Name)
+		index, err := o.loadIndex(indexQuery.Op, indexQuery.TableName, indexInfo.Name)
 		if err != nil {
 			logger.Error("Failed to load index %s: %v", indexInfo.Name, err)
 		} else {
@@ -139,11 +155,15 @@ func (o *OperationsImpl) findRowsByIndex(indexQuery *IndexQuery) (*database.Quer
 	rowIDs, found := indexQuery.Index.Tree.Search(indexQuery.IndexKey)
 	if found {
 		for _, rowID := range rowIDs {
-			if int(rowID) >= len(indexQuery.Table.Data) {
+			if int(rowID) >= len(indexQuery.Table.RowOffsets) {
 				logger.Error("Invalid row ID %d in index %s", rowID, indexQuery.IndexMetaData.Name)
 				continue
 			}
-			row := indexQuery.Table.Data[rowID]
+			row, err := o.ReadRowAt(indexQuery.Table, rowID)
+			if err != nil {
+				logger.Error("Failed to read row %d: %v", rowID, err)
+				return nil, err
+			}
 
 			if indexQuery.Filter != nil {
 				matches, err := indexQuery.Filter(row, indexQuery.Table.Metadata.Columns)
@@ -173,6 +193,41 @@ func (o *OperationsImpl) findRowsByIndex(indexQuery *IndexQuery) (*database.Quer
 	}
 
 	return nil, nil
+}
+
+func (o *OperationsImpl) ReadRowAt(table *database.Table, rowID int64) ([]any, error) {
+	if rowID < 0 || rowID >= int64(len(table.RowOffsets)) {
+		return nil, fmt.Errorf("row ID %d out of bounds", rowID)
+	}
+
+	baseDataOffset := int64(table.Metadata.DataOffset)
+	rowOffset := table.RowOffsets[rowID]
+	absolutePos := baseDataOffset + rowOffset
+
+	table.Mutex.Lock()
+	defer table.Mutex.Unlock()
+
+	if _, err := table.File.Seek(absolutePos, 0); err != nil {
+		return nil, err
+	}
+
+	var rowLength int64
+	if rowID < int64(len(table.RowOffsets))-1 {
+		rowLength = table.RowOffsets[rowID+1] - rowOffset
+	} else {
+		stat, err := table.File.Stat()
+		if err != nil {
+			return nil, err
+		}
+		rowLength = stat.Size() - absolutePos
+	}
+
+	rowBytes := make([]byte, rowLength)
+	if _, err := io.ReadFull(table.File, rowBytes); err != nil {
+		return nil, err
+	}
+
+	return o.Serializer.DeserializeRow(bytes.NewReader(rowBytes), table.Metadata.Columns)
 }
 
 func (o *OperationsImpl) ReadRowFilterWithRequestedColumns(row []any, columns []string, table *database.Table, filter func([]any, []database.Column) (bool, error)) ([]any, error) {
@@ -242,4 +297,20 @@ func BuildResultWithFilteredColumns(columns []string, tableColumns []database.Co
 	}
 
 	return result
+}
+
+func (o *OperationsImpl) LoadAllRows(table *database.Table) error {
+	if len(table.Data) > 0 {
+		return nil
+	}
+
+	table.Data = make([][]any, 0, len(table.RowOffsets))
+	for i := range table.RowOffsets {
+		row, err := o.ReadRowAt(table, int64(i))
+		if err != nil {
+			return err
+		}
+		table.Data = append(table.Data, row)
+	}
+	return nil
 }

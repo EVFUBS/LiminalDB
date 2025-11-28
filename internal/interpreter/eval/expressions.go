@@ -7,7 +7,7 @@ import (
 	"fmt"
 )
 
-func (e *Evaluator) Evaluate(expr ast.Expression, row []any, columns []database.Column) (any, error) {
+func (e *Evaluator) EvaluateValue(expr ast.Expression, row []any, columns []database.Column) (any, error) {
 	switch expr := expr.(type) {
 	case *ast.Identifier:
 		for i, col := range columns {
@@ -25,11 +25,11 @@ func (e *Evaluator) Evaluate(expr ast.Expression, row []any, columns []database.
 	case *ast.BooleanLiteral:
 		return expr.Value, nil
 	case *ast.BinaryExpression:
-		left, err := e.Evaluate(expr.Left, row, columns)
+		left, err := e.EvaluateValue(expr.Left, row, columns)
 		if err != nil {
 			return nil, err
 		}
-		right, err := e.Evaluate(expr.Right, row, columns)
+		right, err := e.EvaluateValue(expr.Right, row, columns)
 		if err != nil {
 			return nil, err
 		}
@@ -56,11 +56,11 @@ func (e *Evaluator) Evaluate(expr ast.Expression, row []any, columns []database.
 			return nil, fmt.Errorf("unsupported binary operator: %s", expr.Op)
 		}
 	case *ast.AssignmentExpression:
-		left, err := e.Evaluate(expr.Left, row, columns)
+		left, err := e.EvaluateValue(expr.Left, row, columns)
 		if err != nil {
 			return nil, err
 		}
-		right, err := e.Evaluate(expr.Right, row, columns)
+		right, err := e.EvaluateValue(expr.Right, row, columns)
 		if err != nil {
 			return nil, err
 		}

@@ -3,15 +3,21 @@ package operations
 import (
 	"LiminalDb/internal/database/indexing"
 	"fmt"
-	"os"
 	"strings"
 )
 
 func (o *OperationsImpl) WriteRows(op *Operation) *Result {
 	logger.Info("Writing %d rows to table: %s", len(op.Data.Insert), op.TableName)
 
-	table, err := o.Serializer.ReadTableFromFile(op.TableName)
+	table, err := o.Serializer.ReadTableFromPath(o.getWorkingTablePath(op, op.TableName))
 	if err != nil {
+		return &Result{Err: err}
+	}
+	if table.File != nil {
+		defer table.File.Close()
+	}
+
+	if err := o.LoadAllRows(table); err != nil {
 		return &Result{Err: err}
 	}
 
@@ -30,7 +36,7 @@ func (o *OperationsImpl) WriteRows(op *Operation) *Result {
 		}
 
 		logger.Debug("Checking foreign key constraints for row: %v", newRow)
-		err := o.writeForeignKeyCheck(table, newRow)
+		err := o.writeForeignKeyCheck(op, table, newRow)
 		if err != nil {
 			return &Result{Err: err}
 		}
@@ -43,7 +49,7 @@ func (o *OperationsImpl) WriteRows(op *Operation) *Result {
 	logger.Debug("Updating indexes for rows: %v", op.Data)
 	for _, idx := range table.Metadata.Indexes {
 		logger.Debug("Updating index %s", idx.Name)
-		index, err := o.loadIndex(op.TableName, idx.Name)
+		index, err := o.loadIndex(op, op.TableName, idx.Name)
 		if err != nil {
 			return &Result{Err: fmt.Errorf("failed to load index %s: %v", idx.Name, err)}
 		}
@@ -77,16 +83,15 @@ func (o *OperationsImpl) WriteRows(op *Operation) *Result {
 		}
 
 		logger.Debug("Writing index %s to file", idx.Name)
-		indexFilePath := getIndexFilePath(op.TableName, idx.Name)
-		if err := os.WriteFile(indexFilePath, indexBytes, 0666); err != nil {
+		if err := o.writeIndexWithShadow(op, indexBytes, op.TableName, idx.Name); err != nil {
 			return &Result{Err: fmt.Errorf("failed to write index %s to file: %v", idx.Name, err)}
 		}
 	}
 
-	err = o.Serializer.WriteTableToFile(table, op.TableName)
+	err = o.writeTableWithShadow(op, table, op.TableName)
 	if err != nil {
 		return &Result{Err: fmt.Errorf("failed to write table %s to file: %v", op.TableName, err)}
 	}
 
-	return &Result{}
+	return &Result{Message: fmt.Sprintf("Successfully inserted %d rows into %s", len(op.Data.Insert), op.TableName)}
 }

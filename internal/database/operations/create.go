@@ -3,7 +3,6 @@ package operations
 import (
 	"LiminalDb/internal/database"
 	"LiminalDb/internal/database/indexing"
-	"os"
 )
 
 func (o *OperationsImpl) CreateTable(op *Operation) *Result {
@@ -41,7 +40,7 @@ func (o *OperationsImpl) CreateTable(op *Operation) *Result {
 		Data:     [][]any{},
 	}
 
-	err := o.Serializer.WriteTableToFile(table, metadata.Name)
+	err := o.writeTableWithShadow(op, table, metadata.Name)
 	if err != nil {
 		logger.Error("Failed to create table %s: %v", metadata.Name, err)
 		return &Result{Err: err}
@@ -56,9 +55,8 @@ func (o *OperationsImpl) CreateTable(op *Operation) *Result {
 			return &Result{Err: err}
 		}
 
-		indexFilePath := getIndexFilePath(metadata.Name, idx.Name)
-		if err := os.WriteFile(indexFilePath, indexBytes, 0666); err != nil {
-			logger.Error("Failed to write index file %s: %v", indexFilePath, err)
+		if err := o.writeIndexWithShadow(op, indexBytes, metadata.Name, idx.Name); err != nil {
+			logger.Error("Failed to write index file %s: %v", idx.Name, err)
 			return &Result{Err: err}
 		}
 

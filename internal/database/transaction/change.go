@@ -1,13 +1,14 @@
 package transaction
 
 import (
-	"LiminalDb/internal/ast"
 	"LiminalDb/internal/database/operations"
 )
 
 type Change struct {
-	Statement ast.Statement
-	Operation operations.Operation
-	Commit    bool
-	Rollback  bool
+	Operation   *operations.Operation
+	Ran         bool
+	Commit      bool
+	Rollback    bool
+	Locks       map[string]Lock
+	ShadowPaths map[string]string // original path → shadow path for this change
 }

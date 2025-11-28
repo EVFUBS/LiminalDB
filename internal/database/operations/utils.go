@@ -3,14 +3,8 @@ package operations
 import (
 	"LiminalDb/internal/database"
 	"fmt"
-	"path/filepath"
 	"strings"
 )
-
-// getIndexFilePath returns the file path for an index
-func getIndexFilePath(tableName string, indexName string) string {
-	return filepath.Join(database.TableDir, fmt.Sprintf("%s_%s.idx", tableName, indexName))
-}
 
 // extractIndexKeyFromRow extracts the key for an index from a row
 func (o *OperationsImpl) extractIndexKeyFromRow(row []any, indexColumns []string, tableColumns []database.Column) (any, error) {
@@ -40,7 +34,6 @@ func (o *OperationsImpl) extractIndexKeyFromRow(row []any, indexColumns []string
 	}
 }
 
-// GetColumnIndex returns the index of a column in a table
 func (o *OperationsImpl) GetColumnIndex(table *database.Table, columnName string) (int, error) {
 	for idx, col := range table.Metadata.Columns {
 		if col.Name == columnName {

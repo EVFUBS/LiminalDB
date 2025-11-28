@@ -1,12 +1,15 @@
 package interpreter
 
 import (
+	ops "LiminalDb/internal/database/operations"
 	e "LiminalDb/internal/interpreter/eval"
 )
 
-func Execute(sql string) (any, error) {
+// TODO: Better name for this file
+
+func Evaluate(sql string) (*[]ops.Operation, error) {
 	evaluator := e.NewEvaluator()
-	return evaluator.Execute(sql)
+	return evaluator.Evaluate(sql)
 }
 
 func SetupEvaluator() *e.Evaluator {

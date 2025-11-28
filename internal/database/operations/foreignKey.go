@@ -5,12 +5,20 @@ import (
 	"fmt"
 )
 
-func (o *OperationsImpl) writeForeignKeyCheck(table *database.Table, newRow []any) error {
+func (o *OperationsImpl) writeForeignKeyCheck(op *Operation, table *database.Table, newRow []any) error {
 	for _, foreignKey := range table.Metadata.ForeignKeys {
 
-		refTable, err := o.Serializer.ReadTableFromFile(foreignKey.ReferencedTable)
+		refTable, err := o.Serializer.ReadTableFromPath(o.getWorkingTablePath(op, foreignKey.ReferencedTable))
 		if err != nil {
 			return fmt.Errorf("failed to read referenced table %s: %w", foreignKey.ReferencedTable, err)
+		}
+		if refTable.File != nil {
+			defer refTable.File.Close()
+		}
+
+		// TODO: Use index lookup instead of full scan
+		if err := o.LoadAllRows(refTable); err != nil {
+			return fmt.Errorf("failed to load rows from referenced table %s: %w", foreignKey.ReferencedTable, err)
 		}
 
 		for _, referencedColumns := range foreignKey.ReferencedColumns {
@@ -77,40 +85,53 @@ func (o *OperationsImpl) deleteRowForeignKeyCheck(table *database.Table, rowsToD
 			continue
 		}
 
-		otherTable, err := o.Serializer.ReadTableFromFile(otherTableName)
-		if err != nil {
-			return fmt.Errorf("failed to read table %s for foreign key check: %w", otherTableName, err)
-		}
+		err := func() error {
+			otherTable, err := o.Serializer.ReadTableFromPath(otherTableName)
+			if err != nil {
+				return fmt.Errorf("failed to read table %s for foreign key check: %w", otherTableName, err)
+			}
+			if otherTable.File != nil {
+				defer otherTable.File.Close()
+			}
 
-		for _, fk := range otherTable.Metadata.ForeignKeys {
-			if fk.ReferencedTable == table.Metadata.Name {
-				for i, row := range table.Data {
-					if !rowsToDelete[i] {
-						continue
-					}
+			if err := o.LoadAllRows(otherTable); err != nil {
+				return fmt.Errorf("failed to load rows from table %s: %w", otherTableName, err)
+			}
 
-					for _, ref := range fk.ReferencedColumns {
-						referencedColIndex, err := o.GetColumnIndex(table, ref.ReferencedColumnName)
-						if err != nil {
-							return fmt.Errorf("failed to find referenced column: %w", err)
+			for _, fk := range otherTable.Metadata.ForeignKeys {
+				if fk.ReferencedTable == table.Metadata.Name {
+					for i, row := range table.Data {
+						if !rowsToDelete[i] {
+							continue
 						}
 
-						valueToDelete := row[referencedColIndex]
-
-						for _, otherRow := range otherTable.Data {
-							otherColIndex, err := o.GetColumnIndex(otherTable, ref.ColumnName)
+						for _, ref := range fk.ReferencedColumns {
+							referencedColIndex, err := o.GetColumnIndex(table, ref.ReferencedColumnName)
 							if err != nil {
-								return fmt.Errorf("failed to find referencing column: %w", err)
+								return fmt.Errorf("failed to find referenced column: %w", err)
 							}
 
-							if otherRow[otherColIndex] == valueToDelete {
-								return fmt.Errorf("foreign key constraint violation: cannot delete row from %s because it is referenced in table %s",
-									table.Metadata.Name, otherTableName)
+							valueToDelete := row[referencedColIndex]
+
+							for _, otherRow := range otherTable.Data {
+								otherColIndex, err := o.GetColumnIndex(otherTable, ref.ColumnName)
+								if err != nil {
+									return fmt.Errorf("failed to find referencing column: %w", err)
+								}
+
+								if otherRow[otherColIndex] == valueToDelete {
+									return fmt.Errorf("foreign key constraint violation: cannot delete row from %s because it is referenced in table %s",
+										table.Metadata.Name, otherTableName)
+								}
 							}
 						}
 					}
 				}
 			}
+			return nil
+		}()
+		if err != nil {
+			return err
 		}
 	}
 

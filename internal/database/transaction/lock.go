@@ -1,6 +1,11 @@
 package transaction
 
-import "sync"
+import (
+	"LiminalDb/internal/common"
+	"LiminalDb/internal/database/operations"
+	"sync"
+	"time"
+)
 
 type LockType int
 
@@ -19,10 +24,11 @@ type Lock struct {
 type LockRequest struct {
 	Lock      Lock
 	Timestamp int64
+	Granted   bool // Track whether this lock has been granted
 }
 
 type LockManager struct {
-	mu        sync.RWMutex
+	mu        sync.Mutex               // Changed from RWMutex to regular Mutex for simpler, safer semantics
 	LockQueue map[string][]LockRequest // ResourceID -> List of lock requests
 }
 
@@ -33,76 +39,132 @@ func NewLockManager() *LockManager {
 	}
 }
 
-// requestLock appends a lock request to the queue for the resource in a thread-safe way.
-func (lm *LockManager) requestLock(resourceID string, lock Lock, timestamp int64) {
-	lm.mu.Lock()
-	defer lm.mu.Unlock()
+// RequestAndWait atomically requests a lock and waits for it to be granted.
+// This consolidates requestLock + checkLock logic and prevents deadlocks.
+// Returns false if the lock cannot be acquired within the timeout.
+func (lm *LockManager) RequestAndWait(resourceID string, lock Lock, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
 
+	lm.mu.Lock()
 	request := LockRequest{
 		Lock:      lock,
-		Timestamp: timestamp,
+		Timestamp: time.Now().Unix(),
+		Granted:   false,
 	}
 	lm.LockQueue[resourceID] = append(lm.LockQueue[resourceID], request)
-}
+	lm.mu.Unlock()
 
-// releaseLock removes the matching lock request for the transaction and resource.
-// It matches by TransactionID and Type (so callers need not hold the exact struct pointer).
-func (lm *LockManager) releaseLock(resourceID string, lock Lock) {
-	lm.mu.Lock()
-	defer lm.mu.Unlock()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
 
-	if requests, ok := lm.LockQueue[resourceID]; ok {
+	for range ticker.C {
+		lm.mu.Lock()
+		requests := lm.LockQueue[resourceID]
+
+		requestIndex := -1
 		for i, req := range requests {
-			if req.Lock.TransactionID == lock.TransactionID && req.Lock.Type == lock.Type {
-				lm.LockQueue[resourceID] = append(requests[:i], requests[i+1:]...)
+			if req.Lock.TransactionID == lock.TransactionID && req.Lock.ResourceID == lock.ResourceID && req.Lock.Type == lock.Type {
+				requestIndex = i
 				break
 			}
 		}
-		// Clean up empty slice to avoid growth of map with empty slices
-		if len(lm.LockQueue[resourceID]) == 0 {
-			delete(lm.LockQueue, resourceID)
+
+		if requestIndex == -1 {
+			lm.mu.Unlock()
+			return false
+		}
+
+		if lm.canGrantLock(requests, requestIndex) {
+			lm.LockQueue[resourceID][requestIndex].Granted = true
+			lm.mu.Unlock()
+			return true
+		}
+
+		lm.mu.Unlock()
+
+		if time.Now().After(deadline) {
+			lm.mu.Lock()
+			for i, req := range lm.LockQueue[resourceID] {
+				if req.Lock.TransactionID == lock.TransactionID && req.Lock.ResourceID == lock.ResourceID && req.Lock.Type == lock.Type {
+					lm.LockQueue[resourceID] = append(
+						lm.LockQueue[resourceID][:i],
+						lm.LockQueue[resourceID][i+1:]...,
+					)
+					break
+				}
+			}
+			if len(lm.LockQueue[resourceID]) == 0 {
+				delete(lm.LockQueue, resourceID)
+			}
+			lm.mu.Unlock()
+			return false
 		}
 	}
+
+	return false
 }
 
-// checkLock returns true when the provided lock request is allowed to proceed.
-// For Exclusive locks the request must be the first in the queue.
-// For Shared locks the request is allowed when there are no earlier Exclusive requests owned by other transactions.
-func (lm *LockManager) checkLock(resourceID string, lock Lock) bool {
-	lm.mu.RLock()
-	defer lm.mu.RUnlock()
-
-	requests, ok := lm.LockQueue[resourceID]
-	if !ok || len(requests) == 0 {
+// canGrantLock checks if the lock at index can be granted given current queue state.
+// Must be called while holding the mutex.
+func (lm *LockManager) canGrantLock(requests []LockRequest, index int) bool {
+	if index >= len(requests) || requests[index].Granted {
 		return false
 	}
 
-	var idx int = -1
-	for i, req := range requests {
-		if req.Lock.TransactionID == lock.TransactionID && req.Lock.Type == lock.Type {
-			idx = i
-			break
+	lockReq := requests[index]
+
+	if lockReq.Lock.Type == Exclusive {
+		// For exclusive locks: no other locks can be granted (even from earlier in the queue)
+		for i := 0; i < len(requests); i++ {
+			if i != index && requests[i].Granted {
+				return false
+			}
+		}
+		return true
+	}
+
+	// For shared locks: can be granted if no exclusive lock is granted or waiting ahead
+	for i := 0; i <= index; i++ {
+		req := requests[i]
+		if req.Lock.Type == Exclusive && (req.Granted || i < index) {
+			return false
 		}
 	}
-	if idx == -1 {
-		return false
-	}
 
-	if lock.Type == Exclusive {
-		return idx == 0
-	}
-
-	for i := 0; i < idx; i++ {
-		if requests[i].Lock.Type == Exclusive && requests[i].Lock.TransactionID != lock.TransactionID {
+	// Check if any exclusive lock is currently granted
+	for i := 0; i < len(requests); i++ {
+		if requests[i].Granted && requests[i].Lock.Type == Exclusive {
 			return false
 		}
 	}
 	return true
 }
 
+// ReleaseLock removes a granted lock for a transaction and resource.
+// This triggers the lock manager to potentially grant waiting locks.
+func (lm *LockManager) ReleaseLock(resourceID string, transactionID string, lockType LockType) {
+	lm.mu.Lock()
+	defer lm.mu.Unlock()
+
+	if requests, ok := lm.LockQueue[resourceID]; ok {
+		for i, req := range requests {
+			if req.Lock.TransactionID == transactionID && req.Lock.Type == lockType && req.Granted {
+				// Remove the released lock
+				lm.LockQueue[resourceID] = append(requests[:i], requests[i+1:]...)
+				break
+			}
+		}
+		if len(lm.LockQueue[resourceID]) == 0 {
+			delete(lm.LockQueue, resourceID)
+		}
+	}
+}
+
+// GetLockQueueSnapshot returns a snapshot of the current lock queue state.
+// Useful for debugging and monitoring.
 func (lm *LockManager) GetLockQueueSnapshot() map[string][]LockRequest {
-	lm.mu.RLock()
-	defer lm.mu.RUnlock()
+	lm.mu.Lock()
+	defer lm.mu.Unlock()
 
 	snapshot := make(map[string][]LockRequest)
 	for resourceID, requests := range lm.LockQueue {
@@ -111,4 +173,22 @@ func (lm *LockManager) GetLockQueueSnapshot() map[string][]LockRequest {
 		snapshot[resourceID] = requestsCopy
 	}
 	return snapshot
+}
+
+// DetermineLockType analyzes operations and returns the appropriate lock type.
+// Write operations and DDL require Exclusive locks; reads use Shared locks.
+func DetermineLockType(operations *[]operations.Operation) LockType {
+	for _, op := range *operations {
+		switch op.Type {
+		case common.Read:
+			return Shared
+		case common.Write, common.Insert, common.Delete, common.Alter, common.CreateTable, common.DropTable,
+			common.CreateProcedure, common.AlterProcedure, common.ExecuteProcedure,
+			common.CreateIndex, common.DropIndex, common.Transaction:
+			return Exclusive
+		default:
+			return Exclusive
+		}
+	}
+	return Shared
 }

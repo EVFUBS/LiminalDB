@@ -1,7 +1,7 @@
 package operations
 
 import (
-	"LiminalDb/internal/database/serializer"
+	"LiminalDb/internal/database/common"
 	"fmt"
 	"os"
 )
@@ -9,7 +9,7 @@ import (
 func (o *OperationsImpl) DropTable(op *Operation) *Result {
 	logger.Info("Dropping table: %s", op.TableName)
 
-	table, err := o.Serializer.ReadTableFromFile(op.TableName)
+	table, err := o.Serializer.ReadTableFromPath(o.getWorkingTablePath(op, op.TableName))
 	if err != nil {
 		if os.IsNotExist(err) {
 			logger.Info("Table %s does not exist", op.TableName)
@@ -18,32 +18,50 @@ func (o *OperationsImpl) DropTable(op *Operation) *Result {
 		logger.Error("Failed to read table %s: %v", op.TableName, err)
 		return &Result{Err: err}
 	}
+	if table.File != nil {
+		table.File.Close()
+	}
 
+	// Delete index files from working path (shadow or real)
 	for _, idx := range table.Metadata.Indexes {
-		indexFilePath := getIndexFilePath(op.TableName, idx.Name)
-		if err := os.Remove(indexFilePath); err != nil && !os.IsNotExist(err) {
-			logger.Error("Failed to remove index file %s: %v", indexFilePath, err)
+		workingIndexPath := o.getWorkingIndexPath(op, op.TableName, idx.Name)
+		if err := os.Remove(workingIndexPath); err != nil && !os.IsNotExist(err) {
+			logger.Error("Failed to remove index file %s: %v", workingIndexPath, err)
 		} else {
 			logger.Info("Dropped index %s from table %s", idx.Name, op.TableName)
 		}
 	}
 
-	err = os.Remove(serializer.GetTableFilePath(op.TableName))
-	if err != nil {
-		logger.Error("Failed to drop table %s: %v", op.TableName, err)
-		return &Result{Err: err}
+	if sm, ok := op.ShadowManager.(ShadowManagerProvider); ok {
+		sm.MarkTableToBeDropped(op.TableName)
+	}
+
+	// If not in a transaction (no shadow manager), also delete the table folder
+	if op.ShadowManager == nil {
+		err = common.DeleteTableFolder(op.TableName)
+		if err != nil {
+			logger.Error("Failed to drop table folder %s: %v", op.TableName, err)
+			return &Result{Err: err}
+		}
 	}
 
 	logger.Info("Table %s dropped successfully", op.TableName)
-	return &Result{}
+	return &Result{Message: fmt.Sprintf("Table %s dropped successfully", op.TableName)}
 }
 
 func (o *OperationsImpl) DropConstraint(op *Operation) *Result {
 	logger.Info("Dropping constraint: %s", op.ConstraintName)
 
-	table, err := o.Serializer.ReadTableFromFile(op.TableName)
+	table, err := o.Serializer.ReadTableFromPath(o.getWorkingTablePath(op, op.TableName))
 	if err != nil {
 		logger.Error("Failed to read table %s: %v", op.TableName, err)
+		return &Result{Err: err}
+	}
+	if table.File != nil {
+		defer table.File.Close()
+	}
+
+	if err := o.LoadAllRows(table); err != nil {
 		return &Result{Err: err}
 	}
 
@@ -53,7 +71,7 @@ func (o *OperationsImpl) DropConstraint(op *Operation) *Result {
 		}
 	}
 
-	if err := o.Serializer.WriteTableToFile(table, op.TableName); err != nil {
+	if err := o.writeTableWithShadow(op, table, op.TableName); err != nil {
 		logger.Error("Failed to save table after dropping constraint: %v", err)
 		return &Result{Err: err}
 	}

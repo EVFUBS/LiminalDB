@@ -2,9 +2,9 @@ package main
 
 import (
 	"LiminalDb/helpers"
+	"LiminalDb/internal/database/server"
 	"LiminalDb/internal/interpreter"
 	l "LiminalDb/internal/logger"
-	"LiminalDb/internal/server"
 	"path/filepath"
 )
 
