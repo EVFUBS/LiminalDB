@@ -39,6 +39,7 @@ type sqlResponse struct {
 type execMsg struct {
 	output string
 	err    error
+	sql    string
 }
 
 // execSQLCmd wraps executeSQL in a Bubble Tea command so it can run
@@ -46,95 +47,149 @@ type execMsg struct {
 func execSQLCmd(addr, sql string) tea.Cmd {
 	return func() tea.Msg {
 		out, err := executeSQL(addr, sql)
-		return execMsg{output: out, err: err}
+		return execMsg{output: out, err: err, sql: sql}
 	}
 }
 
 // key mappings for the TUI.
 type keyMap struct {
-	Quit key.Binding
-	Run  key.Binding
+	Quit        key.Binding
+	Run         key.Binding
+	HistoryUp   key.Binding
+	HistoryDown key.Binding
+	Clear       key.Binding
 }
 
 func newKeyMap() keyMap {
 	return keyMap{
 		Quit: key.NewBinding(
-			key.WithKeys("ctrl+c", "esc", ":q"),
+			key.WithKeys("ctrl+c", "esc"),
 			key.WithHelp("ctrl+c", "quit"),
 		),
 		Run: key.NewBinding(
 			key.WithKeys("enter"),
-			key.WithHelp("enter", "execute SQL"),
+			key.WithHelp("enter", "run"),
+		),
+		HistoryUp: key.NewBinding(
+			key.WithKeys("alt+up"),
+			key.WithHelp("alt+up", "history prev"),
+		),
+		HistoryDown: key.NewBinding(
+			key.WithKeys("alt+down"),
+			key.WithHelp("alt+down", "history next"),
+		),
+		Clear: key.NewBinding(
+			key.WithKeys("ctrl+l"),
+			key.WithHelp("ctrl+l", "clear output"),
 		),
 	}
 }
 
-// ShortHelp returns keybindings to show in the minimized help view.
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Run, k.Quit}
+	return []key.Binding{k.Run, k.Quit, k.Clear, k.HistoryUp}
 }
 
-// FullHelp returns keybindings for the expanded help view.
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Run},
-		{k.Quit},
+		{k.Run, k.Quit, k.Clear},
+		{k.HistoryUp, k.HistoryDown},
 	}
 }
 
 // Styles for the UI.
 var (
-	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205"))
-	subtle      = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	errorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
-	statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("44")).Bold(true)
-	boxStyle    = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("240")).Padding(0, 1)
+	appStyle = lipgloss.NewStyle().Padding(0, 0)
+
+	// Brand colors
+	primaryColor   = lipgloss.Color("#7D56F4") // Vibrant Purple
+	secondaryColor = lipgloss.Color("#5B3C88") // Darker Purple
+	successColor   = lipgloss.Color("#04B575") // Green
+	errorColor     = lipgloss.Color("#FF3E3E") // Red
+	subtleColor    = lipgloss.Color("#626262") // Gray
+	textColor      = lipgloss.Color("#FAFAFA") // White-ish
+
+	titleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(primaryColor).
+			Padding(0, 1).
+			Bold(true)
+
+	// Status Bar Styles
+	statusBarStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Padding(0, 1)
+
+	statusOKStyle      = statusBarStyle.Copy().Background(successColor)
+	statusErrorStyle   = statusBarStyle.Copy().Background(errorColor)
+	statusLoadingStyle = statusBarStyle.Copy().Background(secondaryColor)
+
+	// Viewport Styles
+	viewportStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(subtleColor).
+			Padding(0, 1)
+
+	// Input Styles
+	inputStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(primaryColor).
+			Padding(0, 1)
+
+	// Text Styles
+	errorMessageStyle = lipgloss.NewStyle().Foreground(errorColor)
+	commandStyle      = lipgloss.NewStyle().Foreground(subtleColor)
 )
 
 type model struct {
-	addr     string
-	input    textarea.Model
-	viewport viewport.Model
-	help     help.Model
-	keys     keyMap
-	status   string
-	loading  bool
-	err      error
-	width    int
-	height   int
+	addr       string
+	input      textarea.Model
+	viewport   viewport.Model
+	help       help.Model
+	keys       keyMap
+	status     string
+	loading    bool
+	err        error
+	width      int
+	height     int
+	history    []string
+	historyIdx int
 }
 
 func newModel(addr string) model {
 	ta := textarea.New()
-	ta.Placeholder = "Type SQL here. Use :q or :quit to exit."
+	ta.Placeholder = "SELECT * FROM users..."
 	ta.Focus()
 	ta.Prompt = "SQL> "
 	ta.CharLimit = 0
-	ta.FocusedStyle.CursorLine = ta.FocusedStyle.CursorLine.Background(lipgloss.Color("236"))
 	ta.ShowLineNumbers = false
+	ta.SetHeight(3)
+
+	// Textarea styling
+	ta.FocusedStyle.CursorLine = lipgloss.NewStyle() // No background, just clean text
+	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(primaryColor)
+	ta.FocusedStyle.Base = lipgloss.NewStyle().Foreground(textColor)
 
 	vp := viewport.New(80, 20)
-	vp.SetContent(subtle.Render("Results will appear here."))
+	vp.SetContent("Welcome to LiminalDB TUI.\nType your SQL queries below.")
 
 	h := help.New()
-	h.ShowAll = true
 
 	return model{
-		addr:     addr,
-		input:    ta,
-		viewport: vp,
-		help:     h,
-		keys:     newKeyMap(),
-		status:   "Connected to " + addr,
+		addr:       addr,
+		input:      ta,
+		viewport:   vp,
+		help:       h,
+		keys:       newKeyMap(),
+		status:     "Connected to " + addr,
+		history:    []string{},
+		historyIdx: 0,
 	}
 }
 
-// Init satisfies the tea.Model interface.
 func (m model) Init() tea.Cmd {
 	return textarea.Blink
 }
 
-// Update satisfies the tea.Model interface.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
@@ -142,102 +197,101 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 
-		// We build the layout as:
-		//   title
-		//   server address
-		//   blank line
-		//   "SQL input:" label
-		//   input box
-		//   blank line
-		//   "Results:" label
-		//   results viewport
-		//   blank line
-		//   status line
-		//   help (usually 1–2 lines)
-		//
-		// To ensure the top of the SQL input box is always visible, we
-		// explicitly budget a fixed number of lines for everything *except*
-		// the input box and results viewport, then divide the remaining space
-		// between them. This keeps the total height <= terminal height.
-		const chromeLines = 10 // headers, labels, blanks, status, help
-		const minInputHeight = 3
-		const minResultsHeight = 3
+		headerHeight := 1
+		statusHeight := 1
+		helpHeight := 1
+		inputHeight := 5
 
-		available := m.height - chromeLines
-		if available < 1 {
-			available = 1
+		viewportHeight := m.height - headerHeight - statusHeight - helpHeight - inputHeight - 2
+		if viewportHeight < 5 {
+			viewportHeight = 5
 		}
 
-		var inputHeight, resultsHeight int
-		if available <= minInputHeight+minResultsHeight {
-			// Very small terminals: split space roughly in half.
-			inputHeight = available / 2
-			if inputHeight < 1 {
-				inputHeight = 1
-			}
-			resultsHeight = available - inputHeight
-			if resultsHeight < 1 {
-				resultsHeight = 1
-			}
-		} else {
-			// Normal case: give 1/3 to input, 2/3 to results.
-			inputHeight = available / 3
-			if inputHeight < minInputHeight {
-				inputHeight = minInputHeight
-			}
-			resultsHeight = available - inputHeight
-			if resultsHeight < minResultsHeight {
-				resultsHeight = minResultsHeight
-			}
-		}
+		m.viewport.Width = m.width - 4
+		m.viewport.Height = viewportHeight
 
-		m.input.SetWidth(m.width - 6)
-		m.input.SetHeight(inputHeight)
-		m.viewport.Width = m.width - 6
-		m.viewport.Height = resultsHeight
+		m.input.SetWidth(m.width - 4)
+
+		m.help.Width = m.width
+
 	case tea.KeyMsg:
-		keyStr := msg.String()
-		// Support REPL-style :q / :quit commands as first token.
-		if keyStr == ":" {
-			// Let textarea handle it normally.
-			break
-		}
-
 		if key.Matches(msg, m.keys.Quit) {
 			return m, tea.Quit
 		}
 
+		if key.Matches(msg, m.keys.Clear) {
+			m.viewport.SetContent("Cleared.")
+			m.viewport.GotoBottom()
+			return m, nil
+		}
+
+		if key.Matches(msg, m.keys.HistoryUp) {
+			if len(m.history) > 0 {
+				if m.historyIdx > 0 {
+					m.historyIdx--
+				}
+				m.input.SetValue(m.history[m.historyIdx])
+				m.input.CursorEnd()
+			}
+			return m, nil
+		}
+
+		if key.Matches(msg, m.keys.HistoryDown) {
+			if len(m.history) > 0 {
+				if m.historyIdx < len(m.history)-1 {
+					m.historyIdx++
+					m.input.SetValue(m.history[m.historyIdx])
+				} else {
+					m.historyIdx = len(m.history)
+					m.input.SetValue("")
+				}
+				m.input.CursorEnd()
+			}
+			return m, nil
+		}
+
 		if key.Matches(msg, m.keys.Run) {
-			// On Enter, try to execute the current input buffer as SQL.
 			line := strings.TrimSpace(m.input.Value())
 			if line == "" {
 				break
 			}
-			if line == ":q" || line == ":quit" {
-				return m, tea.Quit
+
+			// Add to history
+			if len(m.history) == 0 || m.history[len(m.history)-1] != line {
+				m.history = append(m.history, line)
 			}
+			m.historyIdx = len(m.history)
 
 			m.loading = true
 			m.status = "Executing..."
 			m.err = nil
 
+			m.input.Reset()
+
 			cmds = append(cmds, execSQLCmd(m.addr, line))
-			break
+			return m, tea.Batch(cmds...)
 		}
+
 	case execMsg:
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err
-			m.status = "Execution failed"
-			m.viewport.SetContent(errorStyle.Render(msg.err.Error()))
+			m.status = "Error"
+			content := m.viewport.View() + "\n\n" +
+				commandStyle.Render("> "+msg.sql) + "\n" +
+				errorMessageStyle.Render(msg.err.Error())
+			m.viewport.SetContent(content)
 		} else {
 			m.err = nil
-			m.status = "Execution succeeded"
-			m.viewport.SetContent(msg.output)
+			m.status = "Ready"
+			content := m.viewport.View() + "\n\n" +
+				commandStyle.Render("> "+msg.sql) + "\n" +
+				msg.output
+			m.viewport.SetContent(content)
 		}
+		m.viewport.GotoBottom()
 	}
 
-	// Let components update themselves.
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	cmds = append(cmds, cmd)
@@ -247,36 +301,39 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// View draws the entire interface.
 func (m model) View() string {
-	title := titleStyle.Render("LiminalDB") + " " + subtle.Render("TUI client")
-	addr := subtle.Render("Server: " + m.addr)
+	// Header
+	header := titleStyle.Render("LiminalDB TUI")
 
-	inputBox := boxStyle.Render(m.input.View())
-	resultBox := boxStyle.Render(m.viewport.View())
+	// Viewport
+	vp := viewportStyle.Render(m.viewport.View())
 
-	status := m.status
+	// Status
+	statusText := m.status
 	if m.loading {
-		status += " (working...)"
-	}
-	statusLine := statusStyle.Render(status)
-	if m.err != nil {
-		statusLine += "  " + errorStyle.Render(m.err.Error())
+		statusText += " ⏳"
 	}
 
+	var status string
+	if m.err != nil {
+		status = statusErrorStyle.Width(m.width).Render("Error: " + m.err.Error())
+	} else if m.loading {
+		status = statusLoadingStyle.Width(m.width).Render(statusText)
+	} else {
+		status = statusOKStyle.Width(m.width).Render(statusText)
+	}
+
+	// Input
+	inp := inputStyle.Render(m.input.View())
+
+	// Help
 	helpView := m.help.View(m.keys)
 
 	return lipgloss.JoinVertical(lipgloss.Left,
-		title,
-		addr,
-		"",
-		"SQL input:",
-		inputBox,
-		"",
-		"Results:",
-		resultBox,
-		"",
-		statusLine,
+		header,
+		vp,
+		status,
+		inp,
 		helpView,
 	)
 }
