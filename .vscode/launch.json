@@ -32,6 +32,21 @@
             ],
             "console": "integratedTerminal",
             "showLog": true
+        },
+        {
+            "name": "Launch TUI",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/cmd/tui",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Run TUI and Server",
+            "configurations": ["Launch TUI", "Launch Server"]
         }
     ]
 }
